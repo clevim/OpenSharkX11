@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#152535"/><stop offset="100%" stop-color="#070b10"/>
+    </linearGradient>
+    <linearGradient id="fin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7af2e4"/><stop offset="100%" stop-color="#3bb8aa"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#5be3d2" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#5be3d2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- fundo -->
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+  <rect width="256" height="256" rx="52" fill="url(#glow)"/>
+
+  <!-- barbatana de tubarão, alinhada e centrada -->
+  <path d="M128 40
+           C150 40 168 90 176 150
+           C180 182 174 206 156 206
+           C144 206 134 196 128 180
+           C122 196 112 206 100 206
+           C82 206 76 182 80 150
+           C88 90 106 40 128 40 Z"
+        fill="url(#fin)"/>
+
+  <!-- entalhe central (sulco da barbatana) -->
+  <path d="M128 40 C128 95 128 160 128 206"
+        stroke="#0c1820" stroke-width="6" stroke-linecap="round" fill="none" opacity=".55"/>
+
+  <!-- base / onda -->
+  <path d="M48 206 C48 206 88 222 128 222 C168 222 208 206 208 206
+           L208 222 C208 222 168 238 128 238 C88 238 48 222 48 222 Z"
+        fill="#0c1820"/>
+  <path d="M48 206 C76 218 100 222 128 222 C156 222 180 218 208 206"
+        stroke="#5be3d2" stroke-width="4" fill="none" stroke-linecap="round" opacity=".8"/>
+</svg>

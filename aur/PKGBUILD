@@ -1,0 +1,66 @@
+# Maintainer: Clevs
+pkgname=sharkctl
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Configurador nativo para o mouse Attack Shark X11 (Electron)"
+arch=('x86_64')
+url="https://github.com/YOUR_USER/sharkctl"
+license=('MIT')
+depends=('electron34' 'libusb')
+makedepends=('nodejs' 'npm')
+install="${pkgname}.install"
+
+# Build local: este PKGBUILD espera ser rodado de dentro da pasta aur/ do
+# próprio repositório, com o restante do projeto um nível acima (../).
+# Não baixa nada — source vazio, usamos o código já presente no disco.
+source=()
+sha256sums=()
+
+prepare() {
+  # copia o projeto (pasta pai de aur/) para srcdir, ignorando artefatos pesados
+  mkdir -p "${srcdir}/sharkctl"
+  cd "${startdir}/.."
+  for item in src assets aur package.json package-lock.json tsconfig.json \
+              electron.vite.config.ts scripts README.md; do
+    if [ -e "$item" ]; then cp -r "$item" "${srcdir}/sharkctl/"; fi
+  done
+}
+
+build() {
+  cd "${srcdir}/sharkctl"
+
+  npm install --no-audit --no-fund
+  npm run build
+
+  npx --yes @electron/asar pack . app.asar \
+    --unpack-dir "node_modules/usb/**" \
+    --exclude-hidden \
+    -- \
+    out package.json node_modules/usb node_modules/node-addon-api \
+    node_modules/node-gyp-build node_modules/pino node_modules/pino-* \
+    assets
+}
+
+package() {
+  cd "${srcdir}/sharkctl"
+
+  install -Dm755 /dev/stdin "${pkgdir}/usr/bin/${pkgname}" <<LAUNCHER
+#!/bin/sh
+exec electron34 /usr/lib/${pkgname}/app.asar "\$@"
+LAUNCHER
+
+  install -Dm644 app.asar "${pkgdir}/usr/lib/${pkgname}/app.asar"
+  if [ -d app.asar.unpacked ]; then
+    cp -r app.asar.unpacked "${pkgdir}/usr/lib/${pkgname}/app.asar.unpacked"
+  fi
+
+  install -Dm644 assets/sharkctl.desktop "${pkgdir}/usr/share/applications/sharkctl.desktop"
+  install -Dm644 assets/icon.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/sharkctl.svg"
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "assets/icons/${size}x${size}.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/sharkctl.png"
+  done
+
+  install -Dm644 aur/99-attack-shark-x11.rules "${pkgdir}/usr/lib/udev/rules.d/99-attack-shark-x11.rules"
+  install -Dm644 aur/sharkctl.service "${pkgdir}/usr/lib/systemd/user/sharkctl.service"
+}

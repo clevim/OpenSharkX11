@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+app.asar
+app.asar.unpacked/
+*.pkg.tar.zst
+src/main/driver/node_modules/
+.DS_Store

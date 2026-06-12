@@ -1,0 +1,67 @@
+{
+  "name": "sharkctl",
+  "version": "1.0.0",
+  "description": "Attack Shark X11 — configurador nativo para Linux",
+  "main": "out/main/index.js",
+  "author": "Clevs",
+  "license": "MIT",
+  "scripts": {
+    "dev": "ELECTRON_OVERRIDE_DIST_PATH=/usr/lib/electron34 electron-vite dev",
+    "build": "electron-vite build",
+    "package": "electron-vite build && electron-builder",
+    "preview": "electron-vite preview",
+    "dev:sys": "electron-vite dev",
+    "start": "ELECTRON_OVERRIDE_DIST_PATH=/usr/lib/electron34 electron-vite preview",
+    "postinstall": "node scripts/setup-electron.mjs",
+    "test-usb": "ELECTRON_OVERRIDE_DIST_PATH=/usr/lib/electron34 node_modules/electron/dist/electron scripts/test-usb.js",
+    "build:asar": "electron-vite build && npx --yes @electron/asar pack . app.asar --unpack-dir \"node_modules/usb/**\" --exclude-hidden -- out package.json node_modules/usb node_modules/node-addon-api node_modules/node-gyp-build node_modules/pino node_modules/pino-* assets",
+    "diag-rgb-safe": "ELECTRON_OVERRIDE_DIST_PATH=/usr/lib/electron34 node_modules/electron/dist/electron scripts/diag-rgb-safe.js"
+  },
+  "build": {
+    "appId": "dev.clevs.sharkctl",
+    "productName": "SharkCtl",
+    "artifactName": "sharkctl-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Settings",
+      "icon": "assets/icon.png"
+    },
+    "electronDist": "/usr/lib/electron34",
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "pino": "10.3.1",
+    "usb": "2.17.0",
+    "@fontsource/chakra-petch": "^5.2.5",
+    "@fontsource/inter": "^5.2.5",
+    "@fontsource/jetbrains-mono": "^5.2.5"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "vite": "^7.3.3",
+    "typescript": "^5.9.3",
+    "@types/node": "^25.9.1",
+    "electron": "^34.0.0"
+  }
+}

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SharkCtl
+GenericName=Configurador do Attack Shark X11
+Comment=Controle DPI, RGB, botões e macros do Attack Shark X11
+Exec=sharkctl %U
+Icon=sharkctl
+Terminal=false
+Categories=Settings;HardwareSettings;Utility;
+Keywords=mouse;attack shark;dpi;rgb;macro;gaming;
+StartupWMClass=sharkctl
