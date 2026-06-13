@@ -32,6 +32,8 @@ const INTERRUPT_ENDPOINT = 0x83;
 export interface AttackSharkX11Events {
 	/** Emitted when the battery level changes */
 	batteryChange: [battery: number];
+	/** Emitted when the physical DPI button cycles to a new stage (0-indexed: 0-5) */
+	dpiStageChange: [stage: number];
 	/** Emitted when a data monitoring error occurs */
 	error: [error: Error];
 }
@@ -106,56 +108,52 @@ export class AttackSharkX11 extends EventEmitter<AttackSharkX11Events> {
 	 * @throws {InterfaceError} If the required interface is not found or cannot be claimed.
 	 * @returns A promise that resolves when the device is ready.
 	 */
-	open(): Promise<unknown> {
-		return new Promise((resolve, reject) => {
+	async open(): Promise<unknown> {
+		try {
+			this.device.open();
+		} catch (e: unknown) {
+			throw new DeviceError(`An unexpected error occurred while trying to open device ${this.connectionMode}`, { cause: e });
+		}
+
+		const iface = this.device.interface(DEVICE_INTERFACE);
+		if (!iface) throw new InterfaceError(`interface ${DEVICE_INTERFACE} not found`, DEVICE_INTERFACE);
+		this.deviceInterface = iface;
+
+		// Tenta reivindicar a interface — retenta até 5x com backoff
+		// (LIBUSB_ERROR_BUSY: kernel driver ativo ou processo anterior morreu sem liberar)
+		let lastClaimErr: unknown = null;
+		for (let attempt = 0; attempt < 5; attempt++) {
 			try {
-				this.device.open();
-			} catch (e: unknown) {
-				reject(
-					new DeviceError(`An unexpected error occurred while trying to open device ${this.connectionMode}`, {
-						cause: e,
-					}),
-				);
-			}
-
-			const iface = this.device.interface(DEVICE_INTERFACE);
-
-			if (!iface) {
-				reject(new InterfaceError(`interface ${DEVICE_INTERFACE} not found`, DEVICE_INTERFACE));
-			}
-
-			this.deviceInterface = iface;
-
-			try {
-				if (process.platform !== 'win32' && iface.isKernelDriverActive()) {
-					iface.detachKernelDriver();
+				if (process.platform !== 'win32') {
+					// Sempre tenta detach — isKernelDriverActive pode retornar false
+					// mesmo quando o driver está ativo dependendo da versão do libusb
+					try { iface.detachKernelDriver() } catch { /* já destacado ou não estava ativo */ }
 				}
-
 				iface.claim();
+				lastClaimErr = null;
+				break;
 			} catch (e: unknown) {
-				this.logger.error('An unexpected error occurred', e);
-				return reject(
-					new InterfaceError(`Could not claim interface ${DEVICE_INTERFACE}`, DEVICE_INTERFACE, { cause: e }),
-				);
+				lastClaimErr = e;
+				if (attempt < 4) await delay(attempt < 2 ? 400 : 800);
 			}
+		}
+		if (lastClaimErr) {
+			this.logger.error('An unexpected error occurred', lastClaimErr);
+			throw new InterfaceError(`Could not claim interface ${DEVICE_INTERFACE}`, DEVICE_INTERFACE, { cause: lastClaimErr });
+		}
 
-			const interruptEndpoint = iface.endpoints.find((e) => e.address === INTERRUPT_ENDPOINT);
+		const interruptEndpoint = iface.endpoints.find((e) => e.address === INTERRUPT_ENDPOINT);
+		if (!interruptEndpoint) throw new InterfaceError(`interruptEndpoint ${INTERRUPT_ENDPOINT} not found`, INTERRUPT_ENDPOINT);
 
-			if (!interruptEndpoint) {
-				return reject(
-					new InterfaceError(`interruptEndpoint ${INTERRUPT_ENDPOINT} not found`, INTERRUPT_ENDPOINT),
-				);
-			}
-
-			this.interruptEndpoint = interruptEndpoint as InEndpoint;
-			this.setupListeners();
-			this.isOpen = true;
-			resolve(true);
-		});
+		this.interruptEndpoint = interruptEndpoint as InEndpoint;
+		this.setupListeners();
+		this.isOpen = true;
+		return true;
 	}
 
 	private setupListeners(): void {
 		this.interruptEndpoint.on('data', (data: Buffer) => {
+			// Bateria: [03 55 40 01 <level>]
 			if (bufferStartsWith(data, Buffer.from([0x03, 0x55, 0x40, 0x01]))) {
 				if (data.length < 5) return;
 				const battery = data[4];
@@ -163,7 +161,22 @@ export class AttackSharkX11 extends EventEmitter<AttackSharkX11Events> {
 					this.lastBattery = battery;
 					this.emit('batteryChange', battery);
 				}
+				return;
 			}
+
+			// Mudança de estágio DPI: [03 55 10 <stage_1-6> 00]
+			// Confirmado empiricamente — mesmo prefixo que bateria mas byte[2]=0x10
+			if (bufferStartsWith(data, Buffer.from([0x03, 0x55, 0x10]))) {
+				if (data.length < 4) return;
+				const stageOneBased = data[3];
+				if (stageOneBased >= 1 && stageOneBased <= 6) {
+					this.emit('dpiStageChange', stageOneBased - 1); // converte para 0-indexed (0-5)
+				}
+				return;
+			}
+
+			// Pacotes desconhecidos — mantém log para investigações futuras
+			this.logger.debug('[interrupt] pacote desconhecido', { hex: data.toString('hex'), bytes: Array.from(data) });
 		});
 
 		this.interruptEndpoint.on('error', (err: Error) => {

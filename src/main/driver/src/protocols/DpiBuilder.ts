@@ -1,7 +1,7 @@
 import type { BaseProtocolBuilder } from '../core/BaseProtocolBuilder.js';
 import { ParamsError } from '../errors.js';
 import { DPI_STEP_MAP } from '../tables/dpi-map.js';
-import { ConnectionMode } from '../types.js';
+import { ConnectionMode, LedMode, type RgbColor } from '../types.js';
 
 const OFFSET = Object.freeze({
 	ANGLE_SNAP: 3,
@@ -10,6 +10,8 @@ const OFFSET = Object.freeze({
 	STAGE_MASK_B: 7,
 	EXPANDED_MASK: 16,
 	CURRENT_STAGE: 24,
+	COLOR_BLOCKS_START: 25,
+	LED_MODE: 49,
 	CHECKSUM_HIGH_BYTE: 50,
 	CHECKSUM_LOW_BYTE: 51,
 	STAGES_START: 8,
@@ -28,6 +30,8 @@ export interface DpiBuilderOptions {
 	ripplerControl?: boolean;
 	dpiValues?: [number, number, number, number, number, number];
 	activeStage?: StageIndex;
+	stageColors?: [RgbColor, RgbColor, RgbColor, RgbColor, RgbColor, RgbColor];
+	ledMode?: LedMode;
 }
 
 /**
@@ -39,6 +43,15 @@ export class DpiBuilder implements BaseProtocolBuilder {
 		ripplerControl: true,
 		dpiValues: [800, 1600, 2400, 3200, 5000, 22000],
 		activeStage: 2,
+		stageColors: [
+			{ r: 0xff, g: 0x00, b: 0x00 },
+			{ r: 0x00, g: 0xff, b: 0x00 },
+			{ r: 0x00, g: 0x00, b: 0xff },
+			{ r: 0xff, g: 0xff, b: 0x00 },
+			{ r: 0x00, g: 0xff, b: 0xff },
+			{ r: 0xff, g: 0x00, b: 0xff },
+		],
+		ledMode: LedMode.Breathing,
 	};
 	readonly buffer: Buffer;
 	public readonly bmRequestType: number = 0x21;
@@ -124,6 +137,13 @@ export class DpiBuilder implements BaseProtocolBuilder {
 		if (config.ripplerControl !== undefined) this.setRipplerControl(config.ripplerControl);
 		if (config.dpiValues !== undefined) this.setStages(config.dpiValues);
 		if (config.activeStage !== undefined) this.setCurrentStage(config.activeStage);
+		if (config.stageColors !== undefined) {
+			for (let i = 0; i < 6; i++) {
+				const color = config.stageColors[i];
+				if (color) this.setStageColor((i + 1) as StageIndex, color);
+			}
+		}
+		if (config.ledMode !== undefined) this.setLedMode(config.ledMode);
 	}
 
 	/**
@@ -141,6 +161,28 @@ export class DpiBuilder implements BaseProtocolBuilder {
 	 */
 	public setRipplerControl(active: boolean = true): this {
 		this.buffer[OFFSET.RIPPLER_CONTROL] = active ? 0x01 : 0x00;
+		return this;
+	}
+
+	/**
+	 * Sets the RGB color for a specific DPI stage (1–6).
+	 * Byte layout: offset 25 + (stage-1)*3 = R, G, B.
+	 */
+	public setStageColor(stage: StageIndex, color: RgbColor): this {
+		const off = OFFSET.COLOR_BLOCKS_START + (stage - 1) * 3;
+		this.buffer[off]     = color.r & 0xff;
+		this.buffer[off + 1] = color.g & 0xff;
+		this.buffer[off + 2] = color.b & 0xff;
+		return this;
+	}
+
+	/**
+	 * Sets the LED confirmation animation (byte 49 of report 0x04).
+	 * One-shot: plays when config is received, then LED turns off.
+	 * Off=0x00, Blink=0x01, Flash=0x02.
+	 */
+	public setLedMode(mode: LedMode): this {
+		this.buffer[OFFSET.LED_MODE] = mode;
 		return this;
 	}
 

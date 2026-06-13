@@ -8,6 +8,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
-    // HTML vanilla, sem framework
+    esbuild: {
+      jsx: 'automatic',
+    }
   }
 })

@@ -5,13 +5,15 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import { homedir } from 'os'
 
 // ─── driver ──────────────────────────────────────────────────────────────────
+import * as usb from 'usb'
 import { AttackSharkX11 } from './driver/src/core/AttackSharkX11.js'
 import { ConnectionMode } from './driver/src/types.js'
 import { DpiBuilder } from './driver/src/protocols/DpiBuilder.js'
 import { MacrosBuilder, macroTemplates, type MacroTuple, FirmwareAction, Modifiers } from './driver/src/protocols/MacrosBuilder.js'
 import { PollingRateBuilder, Rate } from './driver/src/protocols/PollingRateBuilder.js'
-import { UserPreferencesBuilder, LightMode } from './driver/src/protocols/UserPreferencesBuilder.js'
 import { CustomMacroBuilder, MacroMode } from './driver/src/protocols/CustomMacroBuilder.js'
+import { LedMode, type RgbColor } from './driver/src/types.js'
+import { UserPreferencesBuilder, LightMode } from './driver/src/protocols/UserPreferencesBuilder.js'
 
 // ─── persistência ─────────────────────────────────────────────────────────────
 const CFG = join(homedir(), '.config', 'sharkctl')
@@ -37,6 +39,19 @@ function run<T>(fn: () => Promise<T>): Promise<T> {
   return t
 }
 
+// ─── bateria do mouse ────────────────────────────────────────────────────────
+let mouseBattery = -1  // -1=desconhecido; 0-100 = percentual
+let batteryPollTimer: ReturnType<typeof setInterval> | null = null
+
+type BatteryOverride = { mode: LightMode; rgb: RgbColor; ledSpeed: 1|2|3|4|5 } | null
+
+function batteryOverrideForLevel(pct: number): BatteryOverride {
+  if (pct < 0 || pct > 100) return null
+  if (pct < 15) return { mode: LightMode.Breathing, rgb: {r:0xff,g:0x00,b:0x00}, ledSpeed: 5 }
+  if (pct < 30) return { mode: LightMode.Breathing, rgb: {r:0xff,g:0x80,b:0x00}, ledSpeed: 2 }
+  return null
+}
+
 // ─── tipos e estado ───────────────────────────────────────────────────────────
 const BUTTON_KEYS = ['left','right','middle','forward','backward','dpi','scrollUp','scrollDown']
 const BTN_ENUM: Record<string, number> = {
@@ -50,7 +65,12 @@ type Binding = { type: string; template?: string; modifiers?: number; keyCode?: 
 interface AppState {
   dpi: { values: [number,number,number,number,number,number]; activeStage: number; angleSnap: boolean; rippleControl: boolean }
   pollingRate: number
-  lighting: { mode: number; rgb: {r:number;g:number;b:number}; ledSpeed: number }
+  lighting: {
+    mode: LightMode;
+    stageColors: [RgbColor,RgbColor,RgbColor,RgbColor,RgbColor,RgbColor];
+    globalColor: RgbColor;
+    ledSpeed: 1|2|3|4|5;
+  }
   performance: { keyResponse: number }
   power: { sleepTime: number; deepSleepTime: number }
   buttons: Record<string, Binding>
@@ -60,9 +80,21 @@ interface AppState {
 const DEFAULT_STATE: AppState = {
   dpi: { values: [800,1600,2400,3200,5000,22000], activeStage: 2, angleSnap: false, rippleControl: true },
   pollingRate: 1000,
-  lighting: { mode: LightMode.Neon, rgb: {r:91,g:227,b:210}, ledSpeed: 3 },
+  lighting: {
+    mode: LightMode.BreathingDpi,
+    stageColors: [
+      {r:0xff,g:0x00,b:0x00},
+      {r:0x00,g:0xff,b:0x00},
+      {r:0x00,g:0x00,b:0xff},
+      {r:0xff,g:0xff,b:0x00},
+      {r:0x00,g:0xff,b:0xff},
+      {r:0xff,g:0x00,b:0xff},
+    ] as [RgbColor,RgbColor,RgbColor,RgbColor,RgbColor,RgbColor],
+    globalColor: {r:0x00,g:0xff,b:0x00},
+    ledSpeed: 3,
+  },
   performance: { keyResponse: 8 },
-  power: { sleepTime: 5, deepSleepTime: 30 },
+  power: { sleepTime: 0.5, deepSleepTime: 10 },
   buttons: {
     left:    { type:'template', template:'global-left-click' },
     right:   { type:'template', template:'global-right-click' },
@@ -79,6 +111,15 @@ const DEFAULT_STATE: AppState = {
 let state: AppState = loadJson(STATE_FILE, DEFAULT_STATE)
 // garantir que campos novos existem se state estava desatualizado
 state = { ...DEFAULT_STATE, ...state, buttons: { ...DEFAULT_STATE.buttons, ...state.buttons } }
+// migração: garante todos os campos de lighting existem
+if (!Array.isArray((state.lighting as any).stageColors) || !('globalColor' in state.lighting)) {
+  state.lighting = { ...DEFAULT_STATE.lighting, ...state.lighting }
+}
+if (!(state.lighting as any).globalColor) state.lighting.globalColor = DEFAULT_STATE.lighting.globalColor
+if (!(state.lighting as any).ledSpeed) state.lighting.ledSpeed = DEFAULT_STATE.lighting.ledSpeed
+// migração: força sleepTime/deepSleepTime para valores confirmados funcionais
+// (deepSleepTime=30 era o padrão antigo e quebra todos os modos de luz)
+if (state.power.deepSleepTime !== 10) state.power = { sleepTime: 0.5, deepSleepTime: 10 }
 
 let profiles: Record<string, AppState> = loadJson(PROFILES_FILE, {})
 
@@ -92,27 +133,38 @@ function bindingToTuple(b: Binding): MacroTuple {
   return tpl
 }
 
-async function applyAll(d: AttackSharkX11, cfg: AppState) {
+async function applyLightingOnly(d: AttackSharkX11, cfg: AppState) {
   const stage = (Math.min(5, Math.max(0, cfg.dpi.activeStage)) + 1) as 1|2|3|4|5|6
+  const override = batteryOverrideForLevel(mouseBattery)
+  const effectiveMode = override?.mode ?? cfg.lighting.mode
 
   await d.setDpi(new DpiBuilder({
     dpiValues: cfg.dpi.values,
     activeStage: stage,
     angleSnap: cfg.dpi.angleSnap,
     ripplerControl: cfg.dpi.rippleControl,
+    stageColors: cfg.lighting.stageColors,
+    ledMode: LedMode.Off,
   }))
+
+  // Aguardar firmware processar 0x04 antes de enviar 0x05
+  await new Promise<void>(r => setTimeout(r, SAFE_DELAY))
+
+  await d.setUserPreferences(new UserPreferencesBuilder({
+    lightMode: effectiveMode,      // 0x00=Off; firmware pode aceitar como desligar LED
+    rgb: override?.rgb ?? cfg.lighting.globalColor,
+    ledSpeed: override?.ledSpeed ?? cfg.lighting.ledSpeed,
+    keyResponse: cfg.performance.keyResponse as never,
+    sleepTime: 0.5,                // hard-coded: único valor confirmado funcional
+    deepSleepTime: 10,             // hard-coded: único valor confirmado funcional
+  }))
+}
+
+async function applyAll(d: AttackSharkX11, cfg: AppState) {
+  await applyLightingOnly(d, cfg)
 
   await d.setPollingRate(new PollingRateBuilder({
     rate: RATE_MAP[cfg.pollingRate] ?? Rate.eSports
-  }))
-
-  await d.setUserPreferences(new UserPreferencesBuilder({
-    lightMode: cfg.lighting.mode as LightMode,
-    rgb: cfg.lighting.rgb,
-    ledSpeed: cfg.lighting.ledSpeed as 1|2|3|4|5,
-    keyResponse: cfg.performance.keyResponse as never,
-    sleepTime: cfg.power.sleepTime as never,
-    deepSleepTime: cfg.power.deepSleepTime as never,
   }))
 
   const mb = new MacrosBuilder()
@@ -120,7 +172,9 @@ async function applyAll(d: AttackSharkX11, cfg: AppState) {
     const b = cfg.buttons[key]
     if (b) mb.setMacro(BTN_ENUM[key] as never, bindingToTuple(b))
   }
+  console.log('[macro] enviando mapeamento de botões:', mb.toString())
   await d.setMacro(mb)
+  console.log('[macro] setMacro OK')
 
   // macro custom opcional
   const m = cfg.customMacro
@@ -142,8 +196,8 @@ function createWindow(): void {
   nativeTheme.themeSource = 'dark'
 
   mainWin = new BrowserWindow({
-    width: 1060, height: 720,
-    minWidth: 900, minHeight: 600,
+    width: 1200, height: 860,
+    minWidth: 960, minHeight: 720,
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#070b10',
@@ -196,27 +250,12 @@ app.whenReady().then(() => {
       driver = null
     }
 
-    // diagnóstico: lista TODOS os dispositivos USB visíveis pelo módulo nativo
-    try {
-      const usbModule = await import('usb')
-      const all = usbModule.getDeviceList()
-      console.log(`[connect] usb.getDeviceList() retornou ${all.length} dispositivos`)
-      const shark = all.filter((d: any) => d.deviceDescriptor.idVendor === 0x1d57)
-      console.log(`[connect] dispositivos com vendorId 0x1d57 (Attack Shark): ${shark.length}`)
-      for (const d of shark) {
-        console.log(`[connect]   -> idProduct=0x${d.deviceDescriptor.idProduct.toString(16)} bus=${d.busNumber} addr=${d.deviceAddress}`)
-      }
-      if (all.length === 0) {
-        return { ok: false, error: 'Módulo USB nativo não retornou nenhum dispositivo — possível incompatibilidade de ABI com o Electron. Veja o terminal para detalhes.' }
-      }
-      if (shark.length === 0) {
-        return { ok: false, error: `Nenhum dispositivo Attack Shark (vendor 0x1d57) encontrado entre ${all.length} dispositivos USB. Verifique se o mouse/dongle está conectado.` }
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      console.error('[connect] erro ao listar dispositivos USB:', msg)
-      return { ok: false, error: `Falha ao acessar o módulo USB nativo: ${msg}` }
-    }
+    // pre-check rápido: verifica visibilidade USB sem scan extra
+    const all = usb.getDeviceList()
+    if (all.length === 0) return { ok: false, error: 'Módulo USB nativo sem dispositivos — possível incompatibilidade de ABI.' }
+    const shark = all.filter((d: any) => d.deviceDescriptor.idVendor === 0x1d57)
+    if (shark.length === 0) return { ok: false, error: `Mouse não encontrado (${all.length} dispositivos USB detectados). Verifique se o mouse ou dongle está conectado.` }
+    console.log(`[connect] ${shark.length} dispositivo(s) Attack Shark detectado(s)`)
 
     const modes: ConnectionMode[] = preferredMode === 'wired'
       ? [ConnectionMode.Wired, ConnectionMode.Adapter]
@@ -229,8 +268,54 @@ app.whenReady().then(() => {
         const d = new AttackSharkX11({ connectionMode: mode, delayMs: SAFE_DELAY })
         await d.open()
         driver = d
+        mouseBattery = -1
+
+        // Monitor de bateria — reage a mudanças e atualiza LED automaticamente
+        driver.on('batteryChange', (bat: number) => {
+          const prevOverride = batteryOverrideForLevel(mouseBattery)
+          mouseBattery = bat
+          mainWin?.webContents.send('mouse:battery', bat)
+          if (JSON.stringify(batteryOverrideForLevel(bat)) !== JSON.stringify(prevOverride)) {
+            run(() => applyLightingOnly(driver!, state))
+          }
+        })
+
+        // Sincroniza estágio DPI ativo quando o botão físico é pressionado
+        driver.on('dpiStageChange', (stage: number) => {
+          console.log(`[dpi] estágio físico mudou para ${stage} (0-indexed)`)
+          state.dpi.activeStage = stage
+          save(STATE_FILE, state)
+          mainWin?.webContents.send('mouse:dpiStage', stage)
+        })
+
+        // Detecta desconexão inesperada (mouse desligado / cabo removido)
+        driver.on('error', (err: Error) => {
+          console.warn('[usb] driver error — mouse desconectado:', err.message)
+          if (batteryPollTimer) { clearInterval(batteryPollTimer); batteryPollTimer = null }
+          mouseBattery = -1
+          try { driver?.close() } catch {}
+          driver = null
+          mainWin?.webContents.send('mouse:disconnected')
+        })
+
+        // Leitura inicial + poll a cada 5 min (batteryChange pode não disparar sozinho)
+        const pollBattery = async () => {
+          if (!driver) return
+          try {
+            const bat = await driver.getBatteryLevel(2000)
+            if (bat >= 0 && bat !== mouseBattery) driver.emit('batteryChange', bat)
+          } catch {}
+        }
+        pollBattery()
+        if (batteryPollTimer) clearInterval(batteryPollTimer)
+        batteryPollTimer = setInterval(pollBattery, 5 * 60_000)
+
         const modeName = mode === ConnectionMode.Adapter ? 'wireless' : 'wired'
         console.log(`[connect] conectado via ${modeName}`)
+
+        // Aplicar configuração salva automaticamente ao conectar
+        run(() => applyAll(d, state)).catch(e => console.warn('[connect] applyAll falhou:', e.message))
+
         return { ok: true, mode: modeName }
       } catch (e) {
         lastError = e instanceof Error ? e.message : String(e)
@@ -242,6 +327,8 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('device:disconnect', async () => {
+    if (batteryPollTimer) { clearInterval(batteryPollTimer); batteryPollTimer = null }
+    mouseBattery = -1
     try { await driver?.close() } catch {}
     driver = null
     return { ok: true }
@@ -249,6 +336,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('device:battery', async () => {
     if (!driver) return null
+    if (mouseBattery >= 0) return mouseBattery
     try { return await driver.getBatteryLevel(1500) } catch { return null }
   })
 
@@ -282,15 +370,24 @@ app.whenReady().then(() => {
   })
 
   // ── perfis ──
+  const RESERVED = new Set(['__proto__', 'constructor', 'prototype'])
+  const assertName = (name: unknown): string => {
+    if (typeof name !== 'string' || !name.trim() || name.length > 64 || RESERVED.has(name))
+      throw new Error('Nome de perfil inválido')
+    return name.trim()
+  }
+
   ipcMain.handle('profiles:list',   () => Object.keys(profiles))
-  ipcMain.handle('profiles:save',   (_evt, name: string, cfg?: AppState) => {
-    profiles[name] = cfg ? { ...DEFAULT_STATE, ...cfg } : structuredClone(state)
+  ipcMain.handle('profiles:save',   (_evt, name: unknown, cfg?: AppState) => {
+    const n = assertName(name)
+    profiles[n] = cfg ? { ...DEFAULT_STATE, ...cfg } : structuredClone(state)
     save(PROFILES_FILE, profiles)
     return Object.keys(profiles)
   })
-  ipcMain.handle('profiles:load',   (_evt, name: string) => profiles[name] ?? null)
-  ipcMain.handle('profiles:delete', (_evt, name: string) => {
-    delete profiles[name]
+  ipcMain.handle('profiles:load',   (_evt, name: unknown) => profiles[assertName(name)] ?? null)
+  ipcMain.handle('profiles:delete', (_evt, name: unknown) => {
+    const n = assertName(name)
+    delete profiles[n]
     save(PROFILES_FILE, profiles)
     return Object.keys(profiles)
   })
@@ -298,4 +395,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', async () => {
+  if (batteryPollTimer) { clearInterval(batteryPollTimer); batteryPollTimer = null }
+  if (driver) { try { await driver.close() } catch {} finally { driver = null } }
 })

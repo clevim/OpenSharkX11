@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="dark">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SharkCtl</title>
-<script type="module" src="./main.js"></script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* wss://localhost:*">
+<title>SharkCtl — Attack Shark X11</title>
+<script type="module" src="./main.jsx"></script>
 </head>
-<body><div id="app"></div></body>
+<body><div id="root"></div></body>
 </html>

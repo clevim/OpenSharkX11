@@ -50,7 +50,7 @@ const HID = (() => {
   return m
 })()
 const HID_NAME = Object.fromEntries(Object.entries(HID).map(([k,v])=>[v,k.replace(/^Key|^Digit/,'')]))
-const LIGHT_MODES = [[0,'Desligado'],[0x10,'Estático'],[0x20,'Respiração'],[0x30,'Neon'],[0x40,'Respiração colorida'],[0x50,'DPI estático'],[0x60,'DPI respiração']]
+const LIGHT_MODES = [[0x00,'Off (desligado)'],[0x10,'Estático'],[0x20,'Respiração'],[0x30,'Neon'],[0x40,'Respiração colorida'],[0x50,'DPI estático'],[0x60,'DPI respiração']]
 const BREATHING_MODES = new Set([0x20,0x30,0x40,0x60])
 const DEFAULT_BTNS = {
   left:{type:'template',template:'global-left-click'},right:{type:'template',template:'global-right-click'},
@@ -58,7 +58,10 @@ const DEFAULT_BTNS = {
   backward:{type:'template',template:'global-backward'},dpi:{type:'template',template:'global-dpi-cycle'},
   scrollUp:{type:'template',template:'global-scroll-up'},scrollDown:{type:'template',template:'global-scroll-down'},
 }
-const SWATCHES = ['#ff4444','#ff8c00','#ffe100','#5be38a','#5be3d2','#2e8fff','#a259ff','#ff59d6','#ffffff']
+const SWATCHES = [
+  '#ff0000','#ff6600','#ffff00','#00ff00','#00ffff','#0000ff','#ff00ff','#ffffff', // primárias puras
+  '#ff4444','#ff9933','#ccff00','#00ff88','#00ccff','#6644ff','#ff44cc','#aaaaaa', // variações vivas
+]
 
 // ─── estado ──────────────────────────────────────────────────────────────
 const api = window.api
@@ -66,6 +69,8 @@ let config = null, applied = null, dirty = false
 let connected = false, connMode = null
 let selBtn = null, kbCaptured = null, recording = false, lastRecTs = 0
 let selSection = 'dpi'
+let selStage = 0
+let batteryPct = null
 
 const deep = (o) => JSON.parse(JSON.stringify(o))
 
@@ -111,69 +116,97 @@ function setAccentColor(rgb) {
 
 // ─── render do diagrama do mouse ──────────────────────────────────────────
 function buildMouseSvg() {
-  return `<svg id="mouse-svg" viewBox="0 0 220 320" xmlns="http://www.w3.org/2000/svg">
+  return `<svg id="mouse-svg" viewBox="0 0 240 330" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="var(--bg3)"/><stop offset="100%" stop-color="var(--bg1)"/>
+    <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="var(--bg3)"/>
+      <stop offset="100%" stop-color="var(--bg1)"/>
     </linearGradient>
-    <filter id="glow"><feGaussianBlur stdDeviation="3"/></filter>
+    <radialGradient id="led-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="var(--acc)" stop-opacity="1"/>
+      <stop offset="100%" stop-color="var(--acc)" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
   </defs>
 
-  <!-- corpo: ombros com "V" largo central (entalhe do scroll), afunilando para base oval -->
-  <path d="M82 6
-           L98 6 C100 6 101 7 102 9 L108 26 L112 26 L118 9 C119 7 120 6 122 6
-           L138 6
-           C166 6 182 24 184 50
-           L187 158
-           C189 240 174 300 150 314
-           C128 326 92 326 70 314
-           C46 300 31 240 33 158
-           L36 50
-           C38 24 54 6 82 6 Z"
-        fill="url(#mg)" stroke="var(--line2)" stroke-width="1.5"/>
+  <!-- corpo assimétrico — X11 é mouse para destros: lado direito mais largo -->
+  <!-- vista de cima: lado esquerdo levemente côncavo (zona do polegar), direito convexo -->
+  <path d="
+    M 78 8
+    L 100 8
+    C 101 8 103 9 104 12
+    L 110 28
+    L 116 28
+    L 122 12
+    C 123 9 125 8 126 8
+    L 155 8
+    C 192 8 212 34 214 68
+    L 216 195
+    C 217 262 198 310 168 320
+    C 144 328 100 328 76 320
+    C 46 310 26 262 27 195
+    L 29 130
+    C 27 108 26 92 32 78
+    C 40 58 58 8 78 8 Z"
+    fill="url(#mg)" stroke="var(--line2)" stroke-width="1.5"/>
 
-  <!-- botão esquerdo -->
+  <!-- botão esquerdo principal -->
   <path class="btn-zone" data-btn="left"
-    d="M82 6 L98 6 C100 6 101 7 102 9 L108 26 L110 26 L110 120 C82 120 52 117 37 111 L36 50 C38 24 54 6 82 6 Z"
-    fill="var(--bg3)" stroke="none" opacity=".55"/>
-  <!-- botão direito -->
-  <path class="btn-zone" data-btn="right"
-    d="M138 6 L122 6 C120 6 119 7 118 9 L112 26 L110 26 L110 120 C138 120 168 117 183 111 L184 50 C182 24 166 6 138 6 Z"
-    fill="var(--bg3)" stroke="none" opacity=".55"/>
+    d="M 78 8 L 100 8 C 101 8 103 9 104 12 L 110 28 L 112 28
+       L 112 128 C 88 128 58 124 34 116 L 32 78 C 40 58 58 8 78 8 Z"
+    fill="var(--bg3)" stroke="none" opacity=".5"/>
 
-  <!-- divisão central entre cliques (desce até a borda do corpo, abaixo do scroll) -->
-  <line x1="110" y1="26" x2="110" y2="120" stroke="var(--line2)" stroke-width="1.5"/>
-  <!-- divisão inferior dos botões -->
-  <path d="M36 114 C72 130 148 130 184 114" stroke="var(--line2)" stroke-width="1.5" fill="none"/>
+  <!-- botão direito principal -->
+  <path class="btn-zone" data-btn="right"
+    d="M 155 8 L 126 8 C 125 8 123 9 122 12 L 116 28 L 112 28
+       L 112 128 C 140 128 174 124 208 113 L 214 68 C 212 34 192 8 155 8 Z"
+    fill="var(--bg3)" stroke="none" opacity=".5"/>
+
+  <!-- divisória central (scroll → linha dos botões) -->
+  <line x1="112" y1="28" x2="112" y2="128" stroke="var(--line2)" stroke-width="1.5"/>
+  <!-- linha inferior que separa a área dos cliques do corpo -->
+  <path d="M 33 118 C 72 136 158 136 208 118" stroke="var(--line2)" stroke-width="1.2" fill="none"/>
 
   <!-- scroll wheel -->
-  <rect class="btn-zone" data-btn="middle" x="95" y="22" width="30" height="66" rx="14"
+  <rect class="btn-zone" data-btn="middle" x="97" y="24" width="30" height="72" rx="14"
         fill="var(--bg)" stroke="var(--line2)" stroke-width="1.2"/>
-  <line x1="96" y1="36" x2="124" y2="36" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="43" x2="124" y2="43" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="50" x2="124" y2="50" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="57" x2="124" y2="57" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="64" x2="124" y2="64" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="71" x2="124" y2="71" stroke="var(--line2)" stroke-width="1"/>
-  <line x1="96" y1="78" x2="124" y2="78" stroke="var(--line2)" stroke-width="1"/>
+  <line x1="98"  y1="38"  x2="126" y2="38"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="45"  x2="126" y2="45"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="52"  x2="126" y2="52"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="59"  x2="126" y2="59"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="66"  x2="126" y2="66"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="73"  x2="126" y2="73"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="80"  x2="126" y2="80"  stroke="var(--line2)" stroke-width=".9"/>
+  <line x1="98"  y1="87"  x2="126" y2="87"  stroke="var(--line2)" stroke-width=".9"/>
 
-  <!-- scroll up/down -->
-  <path class="btn-zone" data-btn="scrollUp" d="M110 12 l8 10 h-16Z" fill="var(--acc)" opacity=".25"/>
-  <path class="btn-zone" data-btn="scrollDown" d="M110 110 l8 -10 h-16Z" fill="var(--acc)" opacity=".25"/>
+  <!-- setas scroll up / down (hitbox discreta acima/abaixo da roda) -->
+  <path class="btn-zone" data-btn="scrollUp"
+    d="M 112 13 l 9 11 h-18 Z" fill="var(--acc)" opacity=".22"/>
+  <path class="btn-zone" data-btn="scrollDown"
+    d="M 112 116 l 9 -11 h-18 Z" fill="var(--acc)" opacity=".22"/>
 
-  <!-- botão DPI -->
-  <rect class="btn-zone" data-btn="dpi" x="100" y="126" width="20" height="11" rx="4"
+  <!-- botão DPI — abaixo da roda, no centro -->
+  <rect class="btn-zone" data-btn="dpi" x="101" y="134" width="22" height="12" rx="5"
         fill="var(--bg)" stroke="var(--line2)" stroke-width="1"/>
 
-  <!-- laterais esquerdo (forward/backward) — encaixados na curva do corpo -->
-  <rect class="btn-zone" data-btn="forward"  x="26" y="122" width="12" height="40" rx="6"
-        fill="var(--bg)" stroke="var(--line2)" stroke-width="1.2" transform="rotate(-3 32 142)"/>
-  <rect class="btn-zone" data-btn="backward" x="25" y="168" width="12" height="44" rx="6"
-        fill="var(--bg)" stroke="var(--line2)" stroke-width="1.2" transform="rotate(-5 31 190)"/>
+  <!-- botões laterais esquerda (polegar) — dois botões bem definidos -->
+  <!-- forward (frente / superior) -->
+  <rect class="btn-zone" data-btn="forward"
+    x="18" y="130" width="14" height="42" rx="7"
+    fill="var(--bg2,#1e1e2a)" stroke="var(--line2)" stroke-width="1.3"
+    transform="rotate(-4 25 151)"/>
+  <!-- backward (trás / inferior) -->
+  <rect class="btn-zone" data-btn="backward"
+    x="17" y="178" width="14" height="42" rx="7"
+    fill="var(--bg2,#1e1e2a)" stroke="var(--line2)" stroke-width="1.3"
+    transform="rotate(-7 24 199)"/>
 
-  <!-- LED indicator -->
-  <ellipse cx="110" cy="150" rx="8" ry="3.5" fill="var(--acc)" opacity=".55" id="led-el"/>
-  <ellipse cx="110" cy="150" rx="8" ry="3.5" fill="var(--acc)" opacity=".9" filter="url(#glow)" id="led-glow"/>
+  <!-- LED central — círculo com brilho irradiante -->
+  <circle cx="122" cy="190" r="11" fill="url(#led-grad)" opacity=".18" id="led-halo" filter="url(#glow)"/>
+  <circle cx="122" cy="190" r="6"  fill="var(--acc)" opacity=".7"  id="led-el"/>
+  <circle cx="122" cy="190" r="6"  fill="var(--acc)" opacity=".85" filter="url(#glow)" id="led-glow"/>
 </svg>`
 }
 
@@ -344,10 +377,18 @@ function renderDpi() {
   const stages = card1.querySelector('#dpi-stages')
   config.dpi.values.forEach((v, i) => {
     const row = h('div', 'dpi-stage' + (config.dpi.activeStage===i?' active':''))
+    const dotColor = config.lighting && config.lighting.stageColors ? rgbToHex(config.lighting.stageColors[i]) : 'var(--acc)'
     row.innerHTML = `<button class="stage-num" title="Definir como ativo">${i+1}</button>
+      <span class="stage-dot-mini" style="background:${dotColor}" title="Cor do estágio ${i+1}"></span>
       <input type="range" min="50" max="22000" step="50" value="${v}">
       <span class="stage-val">${v.toLocaleString('pt-BR')}</span>`
-    row.querySelector('.stage-num').onclick = () => { config.dpi.activeStage=i; renderSection('dpi'); markDirty() }
+    row.querySelector('.stage-num').onclick = () => {
+      config.dpi.activeStage = i
+      const isDpiLinked = config.lighting.mode === 0x50 || config.lighting.mode === 0x60
+      if (isDpiLinked && config.lighting.stageColors?.[i]) setAccentColor(config.lighting.stageColors[i])
+      renderSection('dpi'); markDirty()
+    }
+    row.querySelector('.stage-dot-mini').onclick = () => { selStage = i; switchSection('light') }
     const sl = row.querySelector('input')
     sl.oninput = () => { config.dpi.values[i]=+sl.value; row.querySelector('.stage-val').textContent=(+sl.value).toLocaleString('pt-BR'); markDirty() }
     stages.append(row)
@@ -363,89 +404,209 @@ function renderDpi() {
 function renderLight() {
   const body = $('#panel-body')
   body.innerHTML = ''
-  const card = h('div', 'card')
-  const rgb = config.lighting.rgb
-  card.innerHTML = `<div class="card-title">Modo e cor</div>
-    <div class="light-preview" id="lp"></div>
-    <div class="chips" id="light-chips"></div>
-    <div class="field" style="margin-top:16px">
-      <span class="field-label">Cor</span>
-      <input type="color" id="rgb-pick" value="${rgbToHex(rgb)}">
-      <div class="swatches" id="swatches"></div>
-    </div>
-    <div class="field">
-      <span class="field-label">R</span>
-      <input type="number" id="rc" min="0" max="255" value="${rgb.r}" style="width:70px">
-      <span class="field-label" style="min-width:20px">G</span>
-      <input type="number" id="gc" min="0" max="255" value="${rgb.g}" style="width:70px">
-      <span class="field-label" style="min-width:20px">B</span>
-      <input type="number" id="bc" min="0" max="255" value="${rgb.b}" style="width:70px">
-    </div>
-    <div class="field">
-      <span class="field-label">Velocidade do efeito</span>
-      <input type="range" id="led-spd" min="1" max="5" step="1" value="${config.lighting.ledSpeed}">
-      <span class="field-val" id="led-spd-v">${config.lighting.ledSpeed}</span>
-    </div>`
-  body.append(card)
+  const lt = config.lighting
+  const isDpi = lt.mode === 0x50 || lt.mode === 0x60
+  const isOff = lt.mode === 0x00
 
-  // chips de modo
-  const chips = card.querySelector('#light-chips')
-  LIGHT_MODES.forEach(([val,label]) => {
-    const b = h('button', 'chip'+(config.lighting.mode===val?' on':''))
-    b.textContent = label
-    b.onclick = () => { config.lighting.mode=val; renderLight(); markDirty() }
+  // Cartão 1: Modo de animação
+  const modeCard = h('div', 'card')
+  modeCard.innerHTML = `<div class="card-title">Modo de animação</div>
+    <div class="light-mode-grid" id="light-chips"></div>
+    <div class="light-preview-bar${isOff ? '' : (BREATHING_MODES.has(lt.mode) ? ' breathing' : '')}" id="lp"></div>`
+  body.append(modeCard)
+
+  // Chips de modo
+  const chips = modeCard.querySelector('#light-chips')
+  LIGHT_MODES.forEach(([val, label]) => {
+    const on = lt.mode === val
+    const b = h('button', 'light-mode-chip' + (on ? ' on' : ''))
+    b.innerHTML = `<span class="lmc-dot" style="background:${on && !isOff ? rgbToHex(isDpi ? (lt.stageColors[selStage] ?? lt.stageColors[0]) : lt.globalColor) : 'var(--line2)'}"></span>${label}`
+    b.onclick = () => { lt.mode = val; renderLight(); markDirty() }
     chips.append(b)
   })
 
-  // preview bar
-  updateLightPreview()
+  // Atualizar preview bar
+  if (!isOff) {
+    const lp = modeCard.querySelector('#lp')
+    const c = isDpi ? (lt.stageColors[selStage] ?? lt.stageColors[0]) : lt.globalColor
+    lp.style.setProperty('--pc', rgbToHex(c))
+    lp.style.background = `linear-gradient(90deg, ${rgbToHex(c)}, rgba(${c.r},${c.g},${c.b},.15))`
+  }
 
-  // swatches
-  const sw = card.querySelector('#swatches')
+  // Cartão 2: Cor
+  if (!isOff) {
+    const colorCard = h('div', 'card')
+    body.append(colorCard)
+
+    if (isDpi) {
+      // Seletor de cor por estágio
+      colorCard.innerHTML = `<div class="card-title">Cores por estágio DPI</div>
+        <div class="stage-colors-row" id="sc-row"></div>
+        <div id="sc-editor"></div>`
+
+      const row = colorCard.querySelector('#sc-row')
+      lt.stageColors.forEach((c, i) => {
+        const btn = h('button', 'stage-color-btn' + (selStage === i ? ' sel' : ''))
+        btn.innerHTML = `<span style="background:${rgbToHex(c)};width:28px;height:28px;border-radius:50%;display:block;margin:0 auto 4px;border:2px solid ${selStage===i?'var(--acc)':'transparent'}"></span><span style="font-size:.65rem;font-family:var(--font-display)">${i+1}</span>`
+        btn.onclick = () => { selStage = i; renderLight() }
+        row.append(btn)
+      })
+
+      buildStageColorEditor(colorCard.querySelector('#sc-editor'), lt.stageColors[selStage], selStage)
+    } else {
+      // Seletor de cor global
+      const gc = lt.globalColor
+      colorCard.innerHTML = `<div class="card-title">Cor ${lt.mode === 0x30 || lt.mode === 0x40 ? '(base da animação)' : ''}</div>
+        <div class="field">
+          <input type="color" id="rgb-pick" value="${rgbToHex(gc)}">
+          <div class="swatches" id="swatches"></div>
+        </div>
+        <div class="field">
+          <span class="field-label" style="min-width:20px">R</span>
+          <input type="number" id="rc" min="0" max="255" value="${gc.r}" style="width:70px">
+          <span class="field-label" style="min-width:20px">G</span>
+          <input type="number" id="gc-i" min="0" max="255" value="${gc.g}" style="width:70px">
+          <span class="field-label" style="min-width:20px">B</span>
+          <input type="number" id="bc" min="0" max="255" value="${gc.b}" style="width:70px">
+        </div>`
+
+      // swatches
+      const sw = colorCard.querySelector('#swatches')
+      SWATCHES.forEach(c => {
+        const d = h('div','swatch'); d.style.background=c; d.title=c
+        d.onclick = () => { lt.globalColor=hexToRgb(c); renderLight(); setAccentColor(lt.globalColor); markDirty() }
+        sw.append(d)
+      })
+
+      colorCard.querySelector('#rgb-pick').oninput = e => {
+        lt.globalColor = hexToRgb(e.target.value)
+        syncRgbInputs(); setAccentColor(lt.globalColor); updateLightPreview(); markDirty()
+      }
+      const syncFromNums = () => {
+        lt.globalColor = {r:+$('#rc').value||0, g:+$('#gc-i').value||0, b:+$('#bc').value||0}
+        $('#rgb-pick').value = rgbToHex(lt.globalColor)
+        setAccentColor(lt.globalColor); updateLightPreview(); markDirty()
+      }
+      ;['#rc','#gc-i','#bc'].forEach(id => { const el = colorCard.querySelector(id); if(el) el.oninput = syncFromNums })
+      setAccentColor(gc)
+    }
+  }
+
+  // Indicador de override de bateria
+  if (batteryPct !== null && batteryPct < 30) {
+    const ovr = h('div', 'batt-override-notice')
+    ovr.innerHTML = batteryPct < 15
+      ? `<span>⚡ Bateria crítica (${batteryPct}%) — LED forçado para vermelho até carregar</span>`
+      : `<span>⚡ Bateria baixa (${batteryPct}%) — LED forçado para laranja até ≥ 30%</span>`
+    body.append(ovr)
+  }
+
+  // Cartão 3: Velocidade (quando há animação)
+  if (!isOff && lt.mode !== 0x10 && lt.mode !== 0x50) {
+    const spdCard = h('div', 'card')
+    spdCard.innerHTML = `<div class="card-title">Velocidade da animação</div>
+      <div class="field">
+        <span style="font-size:.76rem;color:var(--dim);min-width:50px">Lento</span>
+        <input type="range" id="led-spd" min="1" max="5" step="1" value="${lt.ledSpeed}">
+        <span style="font-size:.76rem;color:var(--dim);min-width:50px;text-align:right">Rápido</span>
+        <span class="field-val" id="led-spd-v" style="min-width:18px;text-align:center">${lt.ledSpeed}</span>
+      </div>`
+    body.append(spdCard)
+    spdCard.querySelector('#led-spd').oninput = e => {
+      lt.ledSpeed = +e.target.value
+      spdCard.querySelector('#led-spd-v').textContent = e.target.value
+      markDirty()
+    }
+  }
+
+  // Atualiza o LED do diagrama e a barra de preview para o modo atual
+  updateLightPreview()
+}
+
+function buildStageColorEditor(container, color, stageIdx) {
+  container.innerHTML = `
+    <div class="stage-editor-inner">
+      <div style="font-family:var(--font-display);font-size:.65rem;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);margin:14px 0 10px">Estágio ${stageIdx + 1}</div>
+      <div class="field">
+        <input type="color" id="sc-pick" value="${rgbToHex(color)}">
+        <div class="swatches" id="sc-swatches"></div>
+      </div>
+      <div class="field">
+        <span class="field-label" style="min-width:20px">R</span>
+        <input type="number" id="sc-r" min="0" max="255" value="${color.r}" style="width:70px">
+        <span class="field-label" style="min-width:20px">G</span>
+        <input type="number" id="sc-g" min="0" max="255" value="${color.g}" style="width:70px">
+        <span class="field-label" style="min-width:20px">B</span>
+        <input type="number" id="sc-b" min="0" max="255" value="${color.b}" style="width:70px">
+      </div>
+    </div>`
+
+  const sw = container.querySelector('#sc-swatches')
   SWATCHES.forEach(c => {
-    const d = h('div','swatch'); d.style.background=c; d.title=c
-    d.onclick = () => { config.lighting.rgb=hexToRgb(c); renderLight(); setAccentColor(config.lighting.rgb); markDirty() }
+    const d = h('div','swatch'); d.style.background=c
+    d.onclick = () => {
+      config.lighting.stageColors[stageIdx] = hexToRgb(c)
+      renderLight(); markDirty()
+    }
     sw.append(d)
   })
 
-  // color picker
-  card.querySelector('#rgb-pick').oninput = e => {
-    config.lighting.rgb=hexToRgb(e.target.value)
-    syncRgbInputs(); setAccentColor(config.lighting.rgb); updateLightPreview(); markDirty()
+  container.querySelector('#sc-pick').oninput = e => {
+    config.lighting.stageColors[stageIdx] = hexToRgb(e.target.value)
+    syncStageInputs(container, stageIdx); updateLightPreview(); markDirty()
   }
-  // canais numéricos
-  const syncFromNums = () => {
-    config.lighting.rgb = {r:+$('#rc').value||0, g:+$('#gc').value||0, b:+$('#bc').value||0}
-    $('#rgb-pick').value = rgbToHex(config.lighting.rgb)
-    setAccentColor(config.lighting.rgb); updateLightPreview(); markDirty()
-  }
-  ;['#rc','#gc','#bc'].forEach(id => card.querySelector(id).oninput = syncFromNums)
 
-  card.querySelector('#led-spd').oninput = e => { config.lighting.ledSpeed=+e.target.value; card.querySelector('#led-spd-v').textContent=e.target.value; markDirty() }
+  const syncStage = () => {
+    const r = +container.querySelector('#sc-r').value||0
+    const g = +container.querySelector('#sc-g').value||0
+    const b = +container.querySelector('#sc-b').value||0
+    config.lighting.stageColors[stageIdx] = {r,g,b}
+    container.querySelector('#sc-pick').value = rgbToHex({r,g,b})
+    updateLightPreview(); markDirty()
+  }
+  ;['#sc-r','#sc-g','#sc-b'].forEach(id => { const el = container.querySelector(id); if(el) el.oninput = syncStage })
+}
+
+function syncStageInputs(container, idx) {
+  const c = config.lighting.stageColors[idx]
+  const pick = container.querySelector('#sc-pick'); if(pick) pick.value = rgbToHex(c)
+  const r = container.querySelector('#sc-r'), g = container.querySelector('#sc-g'), b = container.querySelector('#sc-b')
+  if(r){r.value=c.r;g.value=c.g;b.value=c.b}
 }
 
 function syncRgbInputs() {
-  const rgb = config.lighting.rgb
+  const rgb = config.lighting.globalColor
   const pick = $('#rgb-pick'); if(pick) pick.value = rgbToHex(rgb)
-  const rc=$('#rc'),gc=$('#gc'),bc=$('#bc')
+  const rc=$('#rc'),gc=$('#gc-i'),bc=$('#bc')
   if(rc){rc.value=rgb.r;gc.value=rgb.g;bc.value=rgb.b}
 }
 
 function updateLightPreview() {
-  const lp = $('#lp'); if(!lp) return
-  const {r,g,b} = config.lighting.rgb
-  lp.style.background = `linear-gradient(90deg, rgb(${r},${g},${b}), transparent)`
-  lp.classList.toggle('breathing', BREATHING_MODES.has(config.lighting.mode))
-  // atualizar LED do diagrama
-  const ledEl = $('#led-glow'), ledEl2 = $('#led-el')
-  if(ledEl) {
-    const off = config.lighting.mode === 0
-    ledEl.setAttribute('fill', off ? '#333' : rgbToHex({r,g,b}))
-    ledEl.setAttribute('opacity', off ? '0' : '.9')
-    ledEl2?.setAttribute('fill', off ? '#333' : rgbToHex({r,g,b}))
-    ledEl2?.setAttribute('opacity', off ? '0' : '.55')
+  const lp = $('#lp')
+  const lt = config.lighting
+  const off = lt.mode === 0x00
+  const isDpi = lt.mode === 0x50 || lt.mode === 0x60
+  const c = isDpi ? (lt.stageColors[selStage] ?? lt.stageColors[0]) : lt.globalColor
+  if (lp) {
+    if (off) {
+      lp.style.background = 'var(--line2)'
+      lp.classList.remove('breathing')
+    } else {
+      const {r,g,b} = c
+      lp.style.background = `linear-gradient(90deg, rgb(${r},${g},${b}), rgba(${r},${g},${b},.15))`
+      lp.classList.toggle('breathing', BREATHING_MODES.has(lt.mode))
+    }
   }
-  setAccentColor(config.lighting.rgb)
+  const ledEl = $('#led-glow'), ledEl2 = $('#led-el'), ledHalo = $('#led-halo')
+  if (ledEl) {
+    const fillColor = off || !c ? '#444' : rgbToHex(c)
+    ledEl.setAttribute('fill', fillColor)
+    ledEl.setAttribute('opacity', off ? '0' : '.85')
+    ledEl2?.setAttribute('fill', fillColor)
+    ledEl2?.setAttribute('opacity', off ? '0' : '.7')
+    ledHalo?.setAttribute('opacity', off ? '0' : '.22')
+  }
+  if (!off && c) setAccentColor(c)
 }
 
 // ── Desempenho ──
@@ -563,7 +724,7 @@ function openBindEditor(key) {
       <div id="be-kb-area" ${b.type!=='keyboard'?'style="display:none"':''}>
         <div class="field">
           <span class="field-label">Combinação</span>
-          <button id="kbCapture" ${b.type==='keyboard'?'':'hidden'}>${b.type==='keyboard' ? bindingLabel(b) : 'clique e pressione…'}</button>
+          <button id="kbCapture" style="${b.type==='keyboard'?'':'display:none'}">${b.type==='keyboard' ? bindingLabel(b) : 'clique e pressione…'}</button>
         </div>
       </div>
       <div class="field" style="margin-top:14px;gap:8px">
@@ -612,6 +773,7 @@ function openBindEditor(key) {
       ed.querySelector('#be-tpl-area').style.display = isKb ? 'none' : ''
       ed.querySelector('#be-kb-area').style.display = isKb ? '' : 'none'
       if(isKb && kbc) { kbc.style.display=''; kbc.textContent=kbCaptured?bindingLabel({type:'keyboard',...kbCaptured}):'clique e pressione…' }
+      else if(kbc) kbc.style.display='none'
     }
   })
 
@@ -844,10 +1006,25 @@ function switchSection(name) {
 }
 
 // ─── conexão / status ────────────────────────────────────────────────────
+// aplica o estado de conexão bem-sucedida (usado por tryConnect e reconexão automática)
+async function onConnectSuccess(res) {
+  connected = true; connMode = res.mode
+  reconnectStop()
+  $('#connect-screen').style.display = 'none'
+  $('#conn-dot').className = 'conn-dot ok'
+  $('#conn-txt').textContent = res.mode === 'wireless' ? '2.4 GHz' : 'USB'
+  config = await api.getConfig()
+  applied = deep(config)
+  setAccentColor(config.lighting.globalColor)
+  renderSection(selSection)
+  refreshBattery()
+}
+
 async function tryConnect(preferredMode) {
   const err = $('#conn-error')
   const btn = preferredMode === 'wired' ? $('#cc-wired') : $('#cc-wireless')
   err.hidden = true
+  reconnectStop() // cancela reconexão automática se usuário está clicando manualmente
   if (btn) { btn.disabled = true; btn.style.opacity = '.5' }
 
   let res
@@ -860,21 +1037,69 @@ async function tryConnect(preferredMode) {
   }
 
   if (res.ok) {
-    connected = true; connMode = res.mode
-    $('#connect-screen').style.display = 'none'
-    $('#conn-dot').className = 'conn-dot ok'
-    $('#conn-txt').textContent = res.mode === 'wireless' ? '2.4 GHz' : 'USB'
-    config = await api.getConfig()
-    applied = deep(config)
-    setAccentColor(config.lighting.rgb)
-    renderSection(selSection)
-    refreshBattery()
+    await onConnectSuccess(res)
   } else {
     const msg = res.error || 'Mouse não encontrado'
     err.innerHTML = `<strong>Falha ao conectar:</strong> ${msg}<br>
       <small style="opacity:.7">Verifique: (1) regra udev instalada, (2) mouse ligado, (3) dongle conectado</small>`
     err.hidden = false
   }
+}
+
+// ── reconexão automática ──────────────────────────────────────────────────────
+let _reconnectTimer = null
+
+function reconnectStop() {
+  if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null }
+}
+
+function reconnectSchedule(delayMs = 3000) {
+  reconnectStop()
+  _reconnectTimer = setTimeout(async () => {
+    _reconnectTimer = null
+    if (connected) return
+    try {
+      const res = await api.connect(connMode || 'wireless')
+      if (res.ok) {
+        await onConnectSuccess(res)
+        toast('Mouse reconectado ✓')
+        return
+      }
+    } catch {}
+    reconnectSchedule() // retry em loop
+  }, delayMs)
+}
+
+function enterReconnectMode() {
+  connected = false
+  $('#conn-dot').className = 'conn-dot'
+  $('#conn-txt').textContent = 'reconectando…'
+  $('#batt-bar-wrap').hidden = true
+  // mostra connect-screen com indicador de reconexão
+  const screen = $('#connect-screen')
+  const desc = screen?.querySelector('.conn-desc')
+  if (desc) desc.textContent = 'Reconectando ao mouse…'
+  const errEl = $('#conn-error'); if (errEl) errEl.hidden = true
+  screen.style.display = ''
+  reconnectSchedule(1500) // primeira tentativa em 1.5s
+}
+
+// ── auto-connect no startup ───────────────────────────────────────────────────
+async function tryAutoConnect() {
+  const screen = $('#connect-screen')
+  const desc = screen?.querySelector('.conn-desc')
+  if (desc) desc.textContent = 'Conectando…'
+  const errEl = $('#conn-error'); if (errEl) errEl.hidden = true
+
+  for (const mode of ['wireless', 'wired']) {
+    try {
+      const res = await api.connect(mode)
+      if (res.ok) { await onConnectSuccess(res); return }
+    } catch {}
+  }
+
+  // falhou — restaura tela manual de conexão
+  if (desc) desc.textContent = 'Conecte o mouse para começar'
 }
 
 async function refreshBattery() {
@@ -935,4 +1160,44 @@ $('#cc-wired').onclick = () => tryConnect('wired')
 $('#apply-btn').onclick = applyConfig
 $('#discard-btn').onclick = () => { config=deep(applied); renderSection(selSection); markDirty() }
 
-// render inicial (sem conexão) — mostra tela de conexão
+// Reconexão automática quando o mouse desconecta inesperadamente
+if (api.onDisconnected) {
+  api.onDisconnected(() => {
+    if (connected) enterReconnectMode()
+  })
+}
+
+// Sincronização do estágio DPI pelo botão físico do mouse
+if (api.onDpiStage) {
+  api.onDpiStage((stage) => {
+    if (stage < 0 || stage > 5) return
+    config.dpi.activeStage = stage
+    // atualiza visual se o painel DPI estiver aberto
+    if (selSection === 'dpi') renderSection('dpi')
+    // atualiza cor de acento se o modo for DPI-linked
+    if (config.lighting.mode === 0x50 || config.lighting.mode === 0x60) {
+      const stageColor = config.lighting.stageColors?.[stage]
+      if (stageColor) setAccentColor(stageColor)
+    }
+  })
+}
+
+// Atualização de bateria em tempo real
+if (api.onBattery) {
+  api.onBattery((pct) => {
+    batteryPct = pct
+    const wrap = $('#batt-bar-wrap')
+    const txt = $('#batt-txt')
+    const fill = $('#batt-fill')
+    const big = $('#batt-big')
+    if(wrap) wrap.hidden = false
+    if(txt) txt.textContent = pct+'%'
+    if(fill) { fill.style.width=pct+'%'; fill.style.background = pct < 20 ? 'var(--red)' : pct < 30 ? 'var(--amber)' : 'var(--green)' }
+    if(big) big.textContent = pct+'%'
+    // re-renderiza o painel de luz se estiver aberto (override pode ter mudado)
+    if (selSection === 'light') renderSection('light')
+  })
+}
+
+// tenta conectar automaticamente; se falhar, mostra tela manual
+tryAutoConnect()

@@ -10,6 +10,15 @@ const api = {
   connect: (mode?: string): Promise<{ok:boolean,mode?:string,error?:string}> => ipcRenderer.invoke('device:connect', mode),
   disconnect: () => ipcRenderer.invoke('device:disconnect'),
   battery: (): Promise<number|null> => ipcRenderer.invoke('device:battery'),
+  onBattery: (cb: (pct: number) => void) => {
+    ipcRenderer.on('mouse:battery', (_evt, pct) => cb(pct))
+  },
+  onDpiStage: (cb: (stage: number) => void) => {
+    ipcRenderer.on('mouse:dpiStage', (_evt, stage) => cb(stage))
+  },
+  onDisconnected: (cb: () => void) => {
+    ipcRenderer.on('mouse:disconnected', () => cb())
+  },
 
   // config
   getConfig: () => ipcRenderer.invoke('config:get'),

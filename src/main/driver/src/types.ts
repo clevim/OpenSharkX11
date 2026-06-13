@@ -1,4 +1,29 @@
 /**
+ * RGB color (0-255 per channel).
+ */
+export interface RgbColor {
+	r: number;
+	g: number;
+	b: number;
+}
+
+/**
+ * LED confirmation animation triggered when report 0x04 is received.
+ * These are one-shot animations, NOT continuous effects.
+ * After the animation, the LED turns off and stays off.
+ * The LED will flash the active stage color when the DPI button is pressed.
+ * Controlled by byte 49 of report 0x04.
+ */
+export enum LedMode {
+	/** LED turns off immediately, no animation. */
+	Off = 0x00,
+	/** ~2 quick blinks on config receive, then off. */
+	Blink = 0x01,
+	/** Solid for ~3s on config receive, then off. */
+	Flash = 0x02,
+}
+
+/**
  * Connection modes supported by the driver.
  */
 export enum ConnectionMode {
