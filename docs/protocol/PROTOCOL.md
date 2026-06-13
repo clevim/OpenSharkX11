@@ -14,9 +14,10 @@
 - **Reports que JÁ FUNCIONAM e são SEGUROS de variar**: `0x04` (DPI, 56 bytes,
   `wValue=0x0304`), `0x06` (polling rate, `wValue=0x0306`), MacrosBuilder,
   CustomMacroBuilder. Todos com `wIndex=2`.
-- **Report que NÃO FAZ NADA** (sempre retorna OK mas firmware ignora):
-  `UserPreferencesBuilder`, `wValue=0x0305`, Report ID `0x05`. Pode ser
-  removido/ignorado com segurança — não causa erro, só não tem efeito.
+- **Report `0x05` (UserPreferencesBuilder) FUNCIONA** — controla animações
+  contínuas (Static, Breathing, Neon, ColorBreathing, StaticDpi, BreathingDpi).
+  **Pré-requisito obrigatório**: enviar `0x04` antes; `0x05` sozinho não tem
+  efeito. Ordem: `0x04` (DPI + cores) → `0x05` (modo de animação + velocidade).
 - **Report PERIGOSO, NÃO REUTILIZAR sem motivo muito forte**: Report ID
   `0x0b` (`wValue=0x030b`) — causa efeito visual (LED verde → apaga) e
   aparenta interferir no estado do rádio/pareamento 2.4GHz.
@@ -151,16 +152,184 @@ para outro propósito (talvez modo "todos"/idle/desligado).
 04380100013f20201225384b75810000000000000001000002ff000000ff000000ffffff0000ffffff00ffff4000ffffff020f6800000000
 ```
 
-### 7. Script seguro criado, ainda não executado
-`scripts/diag-rgb-safe.js`: usa o payload base acima (idêntico ao já
-confirmado funcional), e só sobrescreve:
-1. Offsets 25-27 (bloco 1) → roxo `a259ff`
-2. Offsets 28-30 (bloco 2, = estágio ativo no default) → turquesa `5be3d2`
-3. Restaura a paleta original
+### 7. Primeiro teste do script — CONFIRMAÇÃO DO LAYOUT RGB (2026-06-12)
 
-Recalcula o checksum (offsets 50-51) a cada variação. **Não toca em**
-`wValue`, `wIndex`, ou Report ID — usa exatamente `0x0304`/`wIndex=2`/
-Report ID `0x04`, que é o mesmo já usado pelo DPI.
+`scripts/diag-rgb-safe.js` executado. Payload base: estágio ativo = 2,
+blocos de cor padrão (bloco1=`ff0000`, bloco2=`00ff00`, etc).
+
+**Teste 1** — bloco 1 (offsets 25-27) `ff0000` → roxo `a259ff`:
+- Payload enviado: `04380100013f20201225384b75810000000000000001000002a259ff00ff000000ffffff0000ffffff00ffff4000ffffff02106300000000`
+- Resultado observado: **piscou verde e desligou**
+- Análise: mudar bloco 1 não teve efeito visível — o estágio ativo era 2,
+  então o LED continuou exibindo a cor do bloco 2 (`00ff00` = verde).
+  "Desligou" = fase off do modo breathing (byte 49 = `0x02`).
+
+**Teste 2** — bloco 2 (offsets 28-30) `00ff00` → turquesa `5be3d2`:
+- Payload enviado: `04380100013f20201225384b75810000000000000001000002ff00005be3d20000ffffff0000ffffff00ffff4000ffffff02107900000000`
+- Resultado observado: **piscou meio ciano e desligou**
+- Análise: turquesa (`5be3d2`) ≈ ciano — mudança de cor **confirmada**.
+  **PROVA DEFINITIVA**: bloco 2 (offsets 28-30) = cor do estágio 2.
+
+**Teste 3** — paleta original restaurada:
+- Payload enviado: `04380100013f20201225384b75810000000000000001000002ff000000ff000000ffffff0000ffffff00ffff4000ffffff020f6800000000`
+
+---
+
+### 8. Mapeamento do byte 49 — modos/efeitos (2026-06-12)
+
+`scripts/diag-rgb-mode.js` — fase 1 (`0x00`-`0x03`) e fase 2 (`0x04`-`0x08`).
+
+| byte 49 | Comportamento observado |
+|---------|------------------------|
+| `0x00`  | LED apagado |
+| `0x01`  | Pisca verde ~3-4x e para (blink finito) |
+| `0x02`  | Breathing (acende verde, fica alguns segundos, apaga) |
+| `0x03`  | LED apagado |
+| `0x04`–`0x08` | LED apagado (firmware ignora valores desconhecidos) |
+
+**Fase 3 — valores altos + bytes 14-15 (2026-06-12):**
+
+| Teste | Observado |
+|-------|-----------|
+| `byte49=0x0a` | apagado |
+| `byte49=0x10` | apagado |
+| `byte49=0xff` | apagado |
+| `byte49=0x02 + byte14=0x01` | "acendeu verde por um tempo e desligou" (sem diferença perceptível) |
+| `byte49=0x02 + byte14=0xff` | "acendeu verde e desligou" (sem diferença) |
+| `byte49=0x02 + byte15=0x01` | "acendeu verde e desligou" (sem diferença) |
+
+**Conclusão final sobre byte 49 — animações one-shot (2026-06-12):**
+
+Nenhum dos valores produz efeito **contínuo**. Byte 49 controla a animação
+de confirmação disparada no momento em que o payload é recebido. Após a
+animação, o LED apaga e permanece apagado.
+
+| byte 49 | Animação one-shot |
+|---------|-------------------|
+| `0x00` | Nenhuma — apaga imediatamente |
+| `0x01` | ~2 piscadas rápidas, depois apagado |
+| `0x02` | Sólido ~3s (sem fade/gradiente), depois apagado |
+| outros | Apagado (firmware ignora) |
+
+**Respiração azul de fábrica** = estado padrão do firmware *antes* de qualquer
+configuração USB. Uma vez enviado o report `0x04`, o mouse entra em
+"modo configurado": LED apagado, só acende brevemente ao trocar de estágio
+pelo botão físico de DPI.
+
+**Investigação de parâmetros adicionais (2026-06-12) — fases 4-5:**
+
+Testados com scripts `diag-anim-params.js` e `diag-anim-params2.js`:
+
+| Bytes testados | Efeito sobre LED |
+|---------------|-----------------|
+| Byte 5 (`0x3f`) — variado de `0x00` a `0xff` | Sem efeito na duração ou comportamento |
+| Bytes 14-15 | Sem efeito |
+| Bytes 22-23 | Sem efeito na contagem de blinks |
+| Bloco 7 (43-45) zerado ou variado | Sem efeito |
+| Bloco 8 (46-48) zerado | Sem efeito |
+| Bloco7[0] como contador de blinks (`0x01`, `0x05`) | Sempre 3 blinks — ignorado |
+| Estágio ativo como contador de blinks (1, 3, 5) | Sempre 3 blinks — não relacionado |
+| RGB `0x08` vs `0xff` | **Brilho percebido muda** — `0x08` visivelmente mais fraco ✓ |
+
+**Mapa final do que controlamos via USB (atualizado 2026-06-12):**
+
+Via report `0x04`:
+- ✅ Cor por estágio (blocos 1-6, offsets 25-42)
+- ✅ Brilho (via magnitude dos valores RGB)
+- ✅ Animação one-shot ao receber config (byte 49: 0x00=off, 0x01=blink, 0x02=flash 3s)
+- ❌ Contagem de blinks — hardcoded = 3 no firmware
+- ❌ Duração do flash — hardcoded ~3s no firmware
+
+Via report `0x05` (depois de `0x04`):
+- ✅ Modo de animação contínua (Static/Breathing/Neon/ColorBreathing/StaticDpi/BreathingDpi)
+- ✅ Cor global para modos não-DPI (Static, Breathing, Neon, ColorBreathing)
+- ✅ Velocidade da animação (ledSpeed 1=lento … 5=rápido)
+- ✅ Para modos DPI (StaticDpi/BreathingDpi): cor vem dos blocos de `0x04`
+
+---
+
+### 9. BREAKTHROUGH — report `0x05` funciona! (2026-06-12)
+
+`scripts/diag-report03-05.js` — teste de `0x05` APÓS inicialização com `0x04`.
+
+**Contexto**: todos os testes anteriores de `0x05` foram feitos antes de enviar
+`0x04` (mouse em estado de fábrica). O firmware exige que `0x04` seja recebido
+primeiro para aceitar comandos `0x05`.
+
+**Modo base 0x04**: todos os blocos = azul (`0x00 0x00 0xff`), byte49=`0x02` (flash).
+Após o flash azul (3s), `0x05` enviado imediatamente para cada modo:
+
+| Modo | Byte 3 | Comportamento observado |
+|------|--------|------------------------|
+| Static | `0x10` | LED verde **sólido e contínuo** ✓ |
+| Breathing | `0x20` | **Breathing verde contínuo** — não para ✓ |
+| Neon | `0x30` | **Troca de cores com fade rápido, contínuo** ✓ |
+| ColorBreathing | `0x40` | **Breathing com mudança de cor, contínuo** ✓ |
+| StaticDpi | `0x50` | LED **azul sólido** (cor do `0x04`), DPI button não mudava cor* ✓ |
+| BreathingDpi | `0x60` | Breathing azul; botão DPI **reseta** a animação mas mantém azul* ✓ |
+
+*Azul em todos os estágios porque o `0x04` de inicialização tinha todos os
+blocos iguais. Com paleta diversa por estágio, DPI button deve mudar a cor.
+
+**ledSpeed** (`0x05` byte 4 = `6 - userSpeed`):
+- `ledSpeed=1` (hardware=5) → **visivelmente mais lento** ✓
+- `ledSpeed=5` (hardware=1) → **visivelmente mais rápido** ✓
+
+**Report `0x03`** (mesmo formato 56-byte que `0x04`, ID=`0x03`):
+- Mouse ficou em breathing azul (estado do BreathingDpi anterior mantido)
+- `0x03` não produz efeito visual distinto — pode ser ignorado ou alias de `0x04`
+
+**Relatórios de entrada (interrupt endpoint 0x83) — confirmados 2026-06-13:**
+
+| Pacote (hex) | Significado |
+|---|---|
+| `03 55 40 01 <nivel>` | Nível de bateria (0-100) |
+| `03 55 10 <stage> 00` | Botão físico DPI pressionado — stage 1-6 (1-indexed) |
+
+Todos os pacotes compartilham o prefixo `03 55`. Byte 2 discrimina o tipo:
+- `0x40` = bateria (byte 4 = nível)
+- `0x10` = mudança de estágio DPI (byte 3 = estágio 1-6)
+
+---
+
+**Estrutura confirmada do payload `0x05` (15 bytes):**
+```
+[0]  = 0x05  (Report ID)
+[1]  = 0x0f  (len=15)
+[2]  = 0x01  (fixo)
+[3]  = lightMode  (0x00/0x10/0x20/0x30/0x40/0x50/0x60)
+[4]  = (6 - ledSpeed) & 0x0f  (hardware speed invertida)
+[5]  = 0xa8  (deepSleep = 10min)
+[6]  = R
+[7]  = G
+[8]  = B
+[9]  = 0x01  (sleep = 0.5min)
+[10] = 0x04  (keyResponse = 8ms)
+[11] = count(ch ≥ 0x64) + (1 se BreathingDpi)
+[12] = checksum (sum bytes 3-10, & 0xff)
+[13] = 0x00  (padding wireless)
+[14] = 0x00  (padding wireless)
+```
+
+**Fluxo obrigatório para animação contínua:**
+```
+1. setDpi(DpiBuilder)      → report 0x04 (DPI + cores por estágio, byte49=0x00)
+2. setUserPrefs(UserPrefs) → report 0x05 (modo animação + cor global + speed)
+```
+
+---
+
+### Conclusões confirmadas (2026-06-12)
+
+1. **Report `0x04` controla o LED** — confirmado empiricamente. ✓
+2. **`buf[24]` (estágio ativo) determina qual bloco de cor é exibido.**
+   Mapeamento: estágio N → bloco N → offsets `25 + (N-1)*3` a `27 + (N-1)*3`.
+3. **Byte 49 do `0x04`** = animação one-shot (confirmação): `0x00`=off, `0x01`=blink, `0x02`=flash sólido 3s.
+4. **Report `0x05` (UserPreferencesBuilder) FUNCIONA** para animações contínuas,
+   mas precisa ser enviado APÓS `0x04`. ✓
+5. Modos DPI (`0x50`/`0x60`) usam as cores por estágio do `0x04`; modos globais
+   (`0x10`–`0x40`) usam o RGB do próprio `0x05`.
+6. `ledSpeed` é real e funcional (usuário 1-5 → hardware 5-1 invertido).
 
 **Comando**: `npm run diag-rgb-safe` (fechar o app antes).
 
@@ -187,28 +356,34 @@ Report ID `0x04`, que é o mesmo já usado pelo DPI.
 
 ## Plano de próximos passos
 
-1. Rodar `npm run diag-rgb-safe` e documentar o resultado (a cor da luz do
-   mouse mudou? para qual cor? em qual estágio de DPI?).
-2. Se confirmado que offsets 25-47 controlam cor por estágio de DPI:
-   - Mapear qual dos 8 blocos corresponde a qual estágio (1-6) e o que são
-     os 2 blocos extras.
-   - Testar se byte 49 (atualmente `0x02`) controla modo/efeito (Static vs
-     Breathing vs Off) — variar com cautela, sempre a partir do payload
-     base, um valor por vez (`0x00`, `0x01`, `0x03`...).
-   - Testar se velocidade do efeito (LED speed) está em algum outro byte
-     ainda não mapeado (candidatos: 14-15, 22-23, ou parte do 48-49).
-3. Uma vez mapeado, estender `DpiBuilder` (ou criar `LightingBuilder` que
-   compartilha o mesmo report `0x04`) com setters para cor por estágio e
-   modo/efeito.
-4. Atualizar `applyAll()` no main process para enviar a config de
-   iluminação dentro do mesmo `setDpi()` (não em report separado).
-5. Atualizar a UI (`renderLight()`) para refletir o modelo real: cor **por
-   estágio de DPI**, não uma cor global única — provavelmente precisa de
-   redesign da aba de Iluminação.
-6. Remover/depreciar `UserPreferencesBuilder` (report `0x05`) do código,
-   ou mantê-lo apenas para os campos que talvez funcionem de fato
-   (sleepTime/deepSleepTime/keyResponse — não testados ainda, podem estar
-   noutro report também).
+### Fase atual: mapear os blocos de cor por estágio
+
+1. **[FEITO ✓]** Confirmar que report `0x04` controla o LED — confirmado 2026-06-12.
+2. **[FEITO ✓]** Mapear byte 49 (modos): Off=`0x00`, Blink=`0x01`, Breathing=`0x02` — confirmado 2026-06-12.
+
+3. **[FEITO ✓]** Mapear os blocos de cor por estágio — confirmado 2026-06-12.
+   Mapeamento definitivo: **bloco N (offset 25+(N-1)×3) = cor do estágio N**.
+   Blocos 7-8 (offsets 43-48) ainda não mapeados (idle/global/desconhecido).
+
+4. **[FEITO ✓]** `DpiBuilder` estendido com `setStageColor()` e `setLedMode()` — 2026-06-12.
+
+5. **[EM ANDAMENTO]** Atualizar `applyAll()` no main process:
+   - Enviar `0x04` (DPI + cores por estágio, byte49=`0x00`)
+   - Enviar `0x05` (modo de animação + cor global + ledSpeed)
+   - `AppState.lighting` deve incluir: `mode` (LightMode enum), `stageColors` [6×RgbColor],
+     `globalColor` (RgbColor para modos não-DPI), `ledSpeed` (1-5).
+
+6. **[PENDENTE]** Validar StaticDpi/BreathingDpi com paleta diversa por estágio:
+   enviar `0x04` com 6 cores diferentes, depois `0x05` com `0x50`/`0x60`,
+   pressionar botão DPI físico para confirmar que a cor do LED muda.
+
+7. **[PENDENTE]** Atualizar a UI (`renderLight()`) com 6 modos de animação
+   + seletor de velocidade + cor por estágio + cor global para modos não-DPI.
+
+8. **[PENDENTE]** Animações condicionais via código JS (sirene, bateria, notificação,
+   beat-sync de música) — possível via loop no main process alternando payloads
+   `0x04` + `0x05` rapidamente (ex: trocar cor global a cada 500ms para sirene).
+   Não requer novos report IDs — tudo via `0x04`/`0x05` alternados.
 
 ---
 
