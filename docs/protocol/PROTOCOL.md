@@ -237,8 +237,6 @@ Via report `0x04`:
 - ✅ Cor por estágio (blocos 1-6, offsets 25-42)
 - ✅ Brilho (via magnitude dos valores RGB)
 - ✅ Animação one-shot ao receber config (byte 49: 0x00=off, 0x01=blink, 0x02=flash 3s)
-- ❌ Contagem de blinks — hardcoded = 3 no firmware
-- ❌ Duração do flash — hardcoded ~3s no firmware
 
 Via report `0x05` (depois de `0x04`):
 - ✅ Modo de animação contínua (Static/Breathing/Neon/ColorBreathing/StaticDpi/BreathingDpi)
@@ -354,38 +352,6 @@ Todos os pacotes compartilham o prefixo `03 55`. Byte 2 discrimina o tipo:
 
 ---
 
-## Plano de próximos passos
-
-### Fase atual: mapear os blocos de cor por estágio
-
-1. **[FEITO ✓]** Confirmar que report `0x04` controla o LED — confirmado 2026-06-12.
-2. **[FEITO ✓]** Mapear byte 49 (modos): Off=`0x00`, Blink=`0x01`, Breathing=`0x02` — confirmado 2026-06-12.
-
-3. **[FEITO ✓]** Mapear os blocos de cor por estágio — confirmado 2026-06-12.
-   Mapeamento definitivo: **bloco N (offset 25+(N-1)×3) = cor do estágio N**.
-   Blocos 7-8 (offsets 43-48) ainda não mapeados (idle/global/desconhecido).
-
-4. **[FEITO ✓]** `DpiBuilder` estendido com `setStageColor()` e `setLedMode()` — 2026-06-12.
-
-5. **[EM ANDAMENTO]** Atualizar `applyAll()` no main process:
-   - Enviar `0x04` (DPI + cores por estágio, byte49=`0x00`)
-   - Enviar `0x05` (modo de animação + cor global + ledSpeed)
-   - `AppState.lighting` deve incluir: `mode` (LightMode enum), `stageColors` [6×RgbColor],
-     `globalColor` (RgbColor para modos não-DPI), `ledSpeed` (1-5).
-
-6. **[PENDENTE]** Validar StaticDpi/BreathingDpi com paleta diversa por estágio:
-   enviar `0x04` com 6 cores diferentes, depois `0x05` com `0x50`/`0x60`,
-   pressionar botão DPI físico para confirmar que a cor do LED muda.
-
-7. **[PENDENTE]** Atualizar a UI (`renderLight()`) com 6 modos de animação
-   + seletor de velocidade + cor por estágio + cor global para modos não-DPI.
-
-8. **[PENDENTE]** Animações condicionais via código JS (sirene, bateria, notificação,
-   beat-sync de música) — possível via loop no main process alternando payloads
-   `0x04` + `0x05` rapidamente (ex: trocar cor global a cada 500ms para sirene).
-   Não requer novos report IDs — tudo via `0x04`/`0x05` alternados.
-
----
 
 ## Referências
 
