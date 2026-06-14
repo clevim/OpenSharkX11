@@ -23,7 +23,7 @@ Cockpit-style interface: frameless window, sidebar with a clickable mouse diagra
 
 | Section | What you can configure |
 |---|---|
-| **DPI** | 6 independent stages · up to 26,000 DPI · color per stage · Angle Snap · Ripple Control |
+| **DPI** | 6 independent stages · up to 22,000 DPI · color per stage · Angle Snap · Ripple Control |
 | **Lighting** | 7 modes (Off, Static, Breathing, Neon, ColorBreathing, StaticDPI, BreathingDPI) · speed · global color |
 | **Buttons** | Remap all 8 buttons: native mouse actions, custom keyboard shortcuts |
 | **Performance** | Polling rate (125 / 250 / 500 / 1000 Hz) · debounce (4–50 ms) · 250–1000 Hz disabled in USB-C mode (max 125 Hz) |
