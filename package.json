@@ -49,6 +49,7 @@
       "!node_modules/usb/prebuilds/linux-ia32/**"
     ],
     "asar": true,
+    "npmRebuild": false,
     "asarUnpack": [
       "node_modules/usb/**",
       "node_modules/node-gyp-build/**"
