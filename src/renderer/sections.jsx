@@ -110,8 +110,8 @@ export function ConsoleSection({ctx}){
         </Panel>
         <Panel label={t('con.summary')} idx="04">
           <div className="stack" style={{gap:'9px'}}>
-            <div className="row"><span className="k">{t('con.profile')}</span><span className="v" style={{color:'var(--live)'}}>{state.profiles[state.activeProfile]?.name}</span></div>
-            <div className="row"><span className="k">{t('con.lightmode')}</span><span className="v">{MODES.find(m=>m.id===state.mode).name}</span></div>
+            <div className="row"><span className="k">{t('con.profile')}</span><span className="v" style={{color:'var(--live)'}}>{state.profiles[state.activeProfile]?.name??'—'}</span></div>
+            <div className="row"><span className="k">{t('con.lightmode')}</span><span className="v">{MODES.find(m=>m.id===state.mode)?.name??'Off'}</span></div>
             <div className="row"><span className="k">Angle snap</span><span className="v">{state.angleSnap?'ON':'OFF'}</span></div>
             <div className="row"><span className="k">Ripple control</span><span className="v">{state.ripple?'ON':'OFF'}</span></div>
             <div className="row"><span className="k">{t('con.debounce')}</span><span className="v">{state.debounce} ms</span></div>
@@ -216,7 +216,7 @@ export function LightingSection({ctx}){
       </div>
 
       <div className="center-col">
-        <MouseFrame caption={usbConn ? 'STATIC · USB' : MODES.find(m=>m.id===state.mode).name.toUpperCase()+' · '+t('lt.preview')}>
+        <MouseFrame caption={usbConn ? 'STATIC · USB' : (MODES.find(m=>m.id===state.mode)?.name??'Off').toUpperCase()+' · '+t('lt.preview')}>
           <MouseStage {...ctx.mouseProps} glow={usbConn ? USB_LED : ctx.mouseProps.glow} mode={usbConn ? 'static' : ctx.mouseProps.mode}/>
         </MouseFrame>
         <div className="muted" style={{fontSize:'10px',letterSpacing:'.08em',textAlign:'center',maxWidth:'280px',lineHeight:1.5}}>

@@ -187,9 +187,11 @@ export default function App(){
     setState(s=>({...s, log:[...s.log.slice(-99), entry]}))
   },[])
 
+  const toastTimerRef = useRef(null)
   const showToast = useCallback((msg, err=false)=>{
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToastMsg({msg,err})
-    setTimeout(()=>setToastMsg(null), 3000)
+    toastTimerRef.current = setTimeout(()=>setToastMsg(null), 3000)
   },[])
 
   const setTheme = (v)=>{ setThemeSt(v); localStorage.setItem('osx11_theme',JSON.stringify(v)) }
@@ -264,30 +266,35 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[connecting])
 
+  // [BUG-2] ref sempre atualizado para evitar stale closure nos listeners IPC
+  const reconnectRef = useRef(null)
+  reconnectRef.current = reconnect
+
   // ── IPC bootstrap ──────────────────────────────────────────────────────────
   useEffect(()=>{
     if(!api) return
 
-    api.onBattery((pct)=>{
-      set({batt:pct})
-    })
-    api.onDpiStage((stage)=>{
-      hwStageRef.current=true
-      setState(s=>({...s, activeStage:stage}))
-      if(appliedRef.current) appliedRef.current={...appliedRef.current, activeStage:stage}
-      addLog({t:ts(),tag:'DPI',cls:'info',m:`Stage ${stage+1} active`})
-    })
-    api.onDisconnected(()=>{
-      setConnected(false); setConnMode(null)
-      set({conn:'disconnected',batt:0})
-      appliedRef.current=null
-      addLog({t:ts(),tag:'USB',cls:'err',m:'Mouse disconnected'})
-      showToast('Mouse disconnected', true)
-    })
-
-    api.onTraySearch(()=>{ reconnect() })
+    // [BUG-6] cada on* retorna cleanup; useEffect devolve todos de uma vez
+    const cleanups = [
+      api.onBattery((pct)=>{ set({batt:pct}) }),
+      api.onDpiStage((stage)=>{
+        hwStageRef.current=true
+        setState(s=>({...s, activeStage:stage}))
+        if(appliedRef.current) appliedRef.current={...appliedRef.current, activeStage:stage}
+        addLog({t:ts(),tag:'DPI',cls:'info',m:`Stage ${stage+1} active`})
+      }),
+      api.onDisconnected(()=>{
+        setConnected(false); setConnMode(null)
+        set({conn:'disconnected',batt:0})
+        appliedRef.current=null
+        addLog({t:ts(),tag:'USB',cls:'err',m:'Mouse disconnected'})
+        showToast('Mouse disconnected', true)
+      }),
+      api.onTraySearch(()=>{ reconnectRef.current?.() }),
+    ]
 
     reconnect()
+    return ()=>{ cleanups.forEach(fn=>fn?.()) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[])
 
@@ -295,60 +302,36 @@ export default function App(){
   const usbCharged = usbConn && state.batt >= 95
   const usbColor   = usbCharged ? USB_CHARGED_COLOR : USB_LED_COLOR
 
+  // [OPT-3] deps precisas — não recalcula em mudanças de log, bindings, polling, etc.
   const glow = useMemo(()=>{
     if(usbConn) return usbColor
     if(state.battOverride){ if(state.batt<15&&state.batt>0) return '#f43f6b'; if(state.batt<30&&state.batt>0) return '#f5a524' }
     if(state.mode==='staticdpi'||state.mode==='breathingdpi') return state.dpi[state.activeStage].color
     if(state.mode==='neon'||state.mode==='colorbreathing') return '#ff0000'
     return state.color
-  },[state, usbConn, usbColor])
+  },[usbConn, usbColor, state.battOverride, state.batt, state.mode, state.dpi, state.activeStage, state.color])
   const lit = usbConn || state.mode!=='off'
   const mouseProps = {markup:mouseLineSvg, glow, mode:usbConn?'static':state.mode, speed:state.speed, lit}
 
-  const applyLighting = async ()=>{
+  // [OPT-2] única função de apply — elimina 40 linhas de código duplicado
+  const applyConfig = async (tag)=>{
     if(!api||!connected) return
     try {
       const patch = reactCfgToMain(state)
       const newCfg = await api.applyConfig(patch)
       const rx = mainCfgToReact(newCfg)
       if(rx) appliedRef.current=rx
-      showToast('Lighting applied ✓')
-      addLog({t:ts(),tag:'RGB',cls:'ok',m:'Lighting sent to mouse'})
+      if(tag==='lighting'){ showToast('Lighting applied ✓'); addLog({t:ts(),tag:'RGB',cls:'ok',m:'Lighting sent to mouse'}) }
+      else if(tag==='buttons'){ showToast('Remap applied ✓'); addLog({t:ts(),tag:'BTN',cls:'ok',m:'Buttons sent to mouse'}) }
+      else { showToast('Performance applied ✓'); addLog({t:ts(),tag:'PERF',cls:'ok',m:`Polling ${state.polling}Hz · Debounce ${state.debounce}ms`}) }
     } catch(e){
       showToast('Error: '+e.message, true)
-      addLog({t:ts(),tag:'RGB',cls:'err',m:e.message})
+      addLog({t:ts(),tag:'CFG',cls:'err',m:e.message})
     }
   }
-
-  const applyBindings = async ()=>{
-    if(!api||!connected) return
-    try {
-      const patch = reactCfgToMain(state)
-      const newCfg = await api.applyConfig(patch)
-      const rx = mainCfgToReact(newCfg)
-      if(rx) appliedRef.current=rx
-      showToast('Remap applied ✓')
-      addLog({t:ts(),tag:'BTN',cls:'ok',m:'Buttons sent to mouse'})
-    } catch(e){
-      showToast('Error: '+e.message, true)
-      addLog({t:ts(),tag:'BTN',cls:'err',m:e.message})
-    }
-  }
-
-  const applyPerf = async ()=>{
-    if(!api||!connected) return
-    try {
-      const patch = reactCfgToMain(state)
-      const newCfg = await api.applyConfig(patch)
-      const rx = mainCfgToReact(newCfg)
-      if(rx) appliedRef.current=rx
-      showToast('Performance applied ✓')
-      addLog({t:ts(),tag:'PERF',cls:'ok',m:`Polling ${state.polling}Hz · Debounce ${state.debounce}ms`})
-    } catch(e){
-      showToast('Error: '+e.message, true)
-      addLog({t:ts(),tag:'PERF',cls:'err',m:e.message})
-    }
-  }
+  const applyLighting = ()=>applyConfig('lighting')
+  const applyBindings = ()=>applyConfig('buttons')
+  const applyPerf     = ()=>applyConfig('perf')
 
   const refreshProfiles = async ()=>{
     if(!api) return []

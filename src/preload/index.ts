@@ -10,17 +10,27 @@ const api = {
   connect: (mode?: string): Promise<{ok:boolean,mode?:string,error?:string}> => ipcRenderer.invoke('device:connect', mode),
   disconnect: () => ipcRenderer.invoke('device:disconnect'),
   battery: (): Promise<number|null> => ipcRenderer.invoke('device:battery'),
+
+  // [BUG-6] listeners retornam função de cleanup para evitar acúmulo em HMR
   onBattery: (cb: (pct: number) => void) => {
-    ipcRenderer.on('mouse:battery', (_evt, pct) => cb(pct))
+    const h = (_: unknown, pct: number) => cb(pct)
+    ipcRenderer.on('mouse:battery', h)
+    return () => ipcRenderer.off('mouse:battery', h)
   },
   onDpiStage: (cb: (stage: number) => void) => {
-    ipcRenderer.on('mouse:dpiStage', (_evt, stage) => cb(stage))
+    const h = (_: unknown, stage: number) => cb(stage)
+    ipcRenderer.on('mouse:dpiStage', h)
+    return () => ipcRenderer.off('mouse:dpiStage', h)
   },
   onDisconnected: (cb: () => void) => {
-    ipcRenderer.on('mouse:disconnected', () => cb())
+    const h = () => cb()
+    ipcRenderer.on('mouse:disconnected', h)
+    return () => ipcRenderer.off('mouse:disconnected', h)
   },
   onTraySearch: (cb: () => void) => {
-    ipcRenderer.on('tray:search', () => cb())
+    const h = () => cb()
+    ipcRenderer.on('tray:search', h)
+    return () => ipcRenderer.off('tray:search', h)
   },
 
   // config
@@ -35,7 +45,6 @@ const api = {
   profilesDelete: (name: string): Promise<string[]> => ipcRenderer.invoke('profiles:delete', name),
 }
 
-// Log de diagnóstico — aparece no DevTools (Ctrl+Shift+I) se algo der errado
 try {
   contextBridge.exposeInMainWorld('api', api)
   console.log('[preload] window.api exposto com sucesso')

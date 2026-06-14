@@ -201,64 +201,23 @@ function trayIconPath(): string {
     : join(process.resourcesPath, 'assets', 'icons', '24x24.png')
 }
 
-// BGRA byte triplets for battery bar colors
-const BAR_COLORS = {
-  usb:     [0xff, 0x00, 0xc8] as const, // #c800ff magenta
-  charged: [0x76, 0xe6, 0x00] as const, // #00e676 green
-  high:    [0x76, 0xe6, 0x00] as const, // #00e676 green  >= 50%
-  mid:     [0x00, 0x98, 0xff] as const, // #ff9800 orange >= 15%
-  low:     [0x6b, 0x3f, 0xf4] as const, // #f43f6b red    < 15%
+// [OPT-1] cache the resized base image — avoids disk read on every battery update
+let _trayBase: Electron.NativeImage | null = null
+function trayBase(): Electron.NativeImage {
+  if (!_trayBase)
+    _trayBase = nativeImage.createFromPath(trayIconPath()).resize({ width: 22, height: 22 })
+  return _trayBase
 }
 
-function makeTrayIcon(connected: boolean, battery = -1, usbMode = false): Electron.NativeImage {
-  const img = nativeImage.createFromPath(trayIconPath())
-  const resized = img.resize({ width: 22, height: 22 })
-  const size = resized.getSize()
-  const W = size.width, H = size.height
-  const buf = Buffer.from(resized.toBitmap()) // raw BGRA on all platforms
-
-  if (!connected) {
-    for (let i = 0; i < buf.length; i += 4) {
-      const gray = Math.round(0.299 * buf[i + 2] + 0.587 * buf[i + 1] + 0.114 * buf[i])
-      buf[i] = gray; buf[i + 1] = gray; buf[i + 2] = gray
-    }
-    return nativeImage.createFromBitmap(buf, size)
+function makeTrayIcon(connected: boolean): Electron.NativeImage {
+  const base = trayBase()
+  if (connected) return base
+  const size = base.getSize()
+  const buf = Buffer.from(base.toBitmap()) // raw BGRA
+  for (let i = 0; i < buf.length; i += 4) {
+    const gray = Math.round(0.299 * buf[i + 2] + 0.587 * buf[i + 1] + 0.114 * buf[i])
+    buf[i] = gray; buf[i + 1] = gray; buf[i + 2] = gray
   }
-
-  // battery bar: 1px separator + 3px fill at bottom
-  const BAR_H = 3
-  const SEP_ROW = H - BAR_H - 1
-  const usbCharged = usbMode && battery >= 95
-
-  let barColor: readonly [number, number, number]
-  let fillW: number
-  if (usbMode) {
-    barColor = usbCharged ? BAR_COLORS.charged : BAR_COLORS.usb
-    fillW = W // always full width when USB (charging/charged)
-  } else if (battery < 0) {
-    return nativeImage.createFromBitmap(buf, size) // no battery info yet
-  } else {
-    barColor = battery >= 50 ? BAR_COLORS.high : battery >= 15 ? BAR_COLORS.mid : BAR_COLORS.low
-    fillW = Math.max(1, Math.round(W * battery / 100))
-  }
-
-  for (let row = SEP_ROW; row < H; row++) {
-    for (let col = 0; col < W; col++) {
-      const idx = (row * W + col) * 4
-      if (row === SEP_ROW) {
-        // separator: darken existing pixel
-        buf[idx] = Math.round(buf[idx] * 0.3)
-        buf[idx + 1] = Math.round(buf[idx + 1] * 0.3)
-        buf[idx + 2] = Math.round(buf[idx + 2] * 0.3)
-      } else if (col < fillW) {
-        buf[idx] = barColor[0]; buf[idx + 1] = barColor[1]; buf[idx + 2] = barColor[2]; buf[idx + 3] = 255
-      } else {
-        // unfilled portion: dim background
-        buf[idx] = 25; buf[idx + 1] = 25; buf[idx + 2] = 25; buf[idx + 3] = 200
-      }
-    }
-  }
-
   return nativeImage.createFromBitmap(buf, size)
 }
 
@@ -288,7 +247,7 @@ function buildTrayMenu(connected: boolean) {
 
 function updateTray(connected: boolean, battery: number, usbMode: boolean) {
   if (!tray) return
-  tray.setImage(makeTrayIcon(connected, battery, usbMode))
+  tray.setImage(makeTrayIcon(connected))
   tray.setContextMenu(buildTrayMenu(connected))
 
   let tooltip = 'OpenSharkX11'
@@ -331,7 +290,6 @@ function createWindow(): void {
       : join(process.resourcesPath, 'assets', 'icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
       contextIsolation: true,
     },
   })
@@ -482,15 +440,27 @@ app.whenReady().then(() => {
 
   ipcMain.handle('config:apply', async (_evt, patch: Partial<AppState>) => {
     if (!driver) throw new Error('Mouse não conectado')
+    const VALID_RATES = new Set([125, 250, 500, 1000])
+    const clampDpi = (v: unknown) => Math.max(50, Math.min(22000, Number.isFinite(v) ? (v as number) : 50))
     const merged: AppState = {
       ...state,
       ...patch,
       buttons: { ...state.buttons, ...(patch.buttons ?? {}) },
-      dpi: { ...state.dpi, ...(patch.dpi ?? {}) },
+      dpi: {
+        ...state.dpi,
+        ...(patch.dpi ?? {}),
+        values: (patch.dpi?.values ?? state.dpi.values).map(clampDpi) as AppState['dpi']['values'],
+        activeStage: Math.max(0, Math.min(5, patch.dpi?.activeStage ?? state.dpi.activeStage)),
+      },
       lighting: { ...state.lighting, ...(patch.lighting ?? {}) },
-      performance: { ...state.performance, ...(patch.performance ?? {}) },
+      performance: {
+        ...state.performance,
+        ...(patch.performance ?? {}),
+        keyResponse: Math.max(4, Math.min(50, patch.performance?.keyResponse ?? state.performance.keyResponse)),
+      },
       power: { ...state.power, ...(patch.power ?? {}) },
       customMacro: { ...state.customMacro, ...(patch.customMacro ?? {}) },
+      pollingRate: VALID_RATES.has(patch.pollingRate as number) ? (patch.pollingRate as number) : state.pollingRate,
     }
     await run(() => applyAll(driver!, merged))
     state = merged
@@ -534,9 +504,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', async () => {
+let _cleaningUp = false
+app.on('before-quit', (e) => {
+  if (_cleaningUp) return
+  e.preventDefault()
+  _cleaningUp = true
   appIsQuitting = true
   tray?.destroy(); tray = null
   if (batteryPollTimer) { clearInterval(batteryPollTimer); batteryPollTimer = null }
-  if (driver) { try { await driver.close() } catch {} finally { driver = null } }
+  const closeDriver = driver ? driver.close().catch(() => {}) : Promise.resolve()
+  closeDriver.finally(() => { driver = null; app.quit() })
 })
