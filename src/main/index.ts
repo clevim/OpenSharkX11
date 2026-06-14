@@ -405,7 +405,7 @@ app.whenReady().then(() => {
       const d = new AttackSharkX11BLE()
       await d.open()
       attachDriver(d, 'bluetooth')
-      run(() => applyLightingOnly(d, state)).catch(e => console.warn('[connect] applyLightingOnly BLE falhou:', e.message))
+      run(() => applyAll(d, state)).catch(e => console.warn('[connect] applyAll BLE falhou:', e.message))
       return { ok: true, mode: 'bluetooth' }
     }
 

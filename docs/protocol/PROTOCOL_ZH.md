@@ -410,9 +410,21 @@ Payload：`DpiBuilder.build(ConnectionMode.Adapter)`（56 字节）或
 ### 已确认的限制
 
 - **轮询率**：仅限 USB 模式。BLE 下无效。
-- **宏（按键重映射）**：未在 BLE 下测试；BLE 驱动中静默忽略。
 - **通过 hidraw 使用 HID Feature Reports**：`HIDIOCSFEATURE` 返回 `EINVAL` — 该鼠标的 BLE HID 描述符未声明 Feature Reports。
 - **write-without-response**：返回 `NotSupported`；只有 `request`（确认写入）方式有效。
+
+### 按键重映射（BLE）— 已确认
+
+`MacrosBuilder` 生成 **59 字节** payload，Report ID 为 `0x08`（`wValue=0x0308`）。
+通过 fee3 以 `type='request'` 方式发送后，按键重映射可正常生效。
+
+| Payload                | Report ID | 大小  | BLE 是否有效     |
+|------------------------|-----------|-------|-----------------|
+| DpiBuilder             | `0x04`    | 56B   | ✅ 已确认        |
+| UserPreferencesBuilder | `0x05`    | 15B   | ✅ 已确认        |
+| MacrosBuilder          | `0x08`    | 59B   | ✅ 已确认        |
+| CustomMacroBuilder     | `0x08`×4  | 多包  | 未测试           |
+| PollingRateBuilder     | `0x06`    | 9B    | ⛔ 无效          |
 
 ### USB-C 有线模式限制
 

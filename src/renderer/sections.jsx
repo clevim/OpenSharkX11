@@ -109,7 +109,7 @@ export function ConsoleSection({ctx}){
         </MouseFrame>
         <div style={{display:'flex',gap:'10px'}}>
           <div className="stat" style={{textAlign:'center',minWidth:'110px'}}><div className="sl">{t('con.activedpi')}</div><div className="sv" style={{justifyContent:'center',color:activeColor}}>{activeStage.dpi.toLocaleString()}</div></div>
-          <div className="stat" style={{textAlign:'center',minWidth:'110px'}}><div className="sl">POLLING</div><div className="sv" style={{justifyContent:'center'}}>{state.polling}<small>Hz</small></div></div>
+          <div className="stat" style={{textAlign:'center',minWidth:'110px'}}><div className="sl">POLLING</div><div className="sv" style={{justifyContent:'center'}}>{btConn ? 125 : state.polling}<small>Hz</small></div></div>
         </div>
       </div>
 
@@ -409,15 +409,20 @@ export function ButtonsSection({ctx}){
 export function PerfSection({ctx}){
   const {state, t, connected, applyBindings} = ctx
   const applyPerf = ctx.applyPerf || applyBindings
-  const usbWired = state.conn === 'usb'
-  const pollingOpts = POLLING.map(p=>({v:p, l:p+'Hz', disabled: usbWired && p !== 125}))
+  const usbWired    = state.conn === 'usb'
+  const bleConn     = state.conn === 'bluetooth'
+  const pollingVal  = bleConn ? 125 : state.polling
+  const pollingOpts = POLLING.map(p=>({v:p, l:p+'Hz', disabled: bleConn || (usbWired && p !== 125)}))
+  const pollingNote = bleConn   ? '⚠ Bluetooth: máx 125 Hz (fixo)'
+                    : usbWired  ? '⚠ USB-C mode: max 125 Hz'
+                    : t('pf.polling.d')
   return (
     <div className="cockpit fade-in">
       <div className="col">
         <Panel label={t('pf.polling')} idx="01">
-          <Seg live options={pollingOpts} value={state.polling} onChange={v=>ctx.set({polling:v})}/>
+          <Seg live options={pollingOpts} value={pollingVal} onChange={v=>ctx.set({polling:v})}/>
           <div className="muted" style={{fontSize:'10px',marginTop:'10px',lineHeight:1.5}}>
-            {usbWired ? '⚠ USB-C mode: max 125 Hz' : t('pf.polling.d')}
+            {pollingNote}
           </div>
         </Panel>
         <Panel label={t('pf.debounce')} idx="02">
@@ -446,11 +451,11 @@ export function PerfSection({ctx}){
         <div className="stat-grid" style={{width:'100%',maxWidth:'300px'}}>
           <div className="stat" style={{textAlign:'center'}}>
             <div className="sl">{t('pf.report')}</div>
-            <div className="sv" style={{justifyContent:'center'}}>{state.polling}<small>Hz</small></div>
+            <div className="sv" style={{justifyContent:'center'}}>{pollingVal}<small>Hz</small></div>
           </div>
           <div className="stat" style={{textAlign:'center'}}>
             <div className="sl">{t('pf.interval')}</div>
-            <div className="sv" style={{justifyContent:'center'}}>{(1000/state.polling).toFixed(1)}<small>ms</small></div>
+            <div className="sv" style={{justifyContent:'center'}}>{(1000/pollingVal).toFixed(1)}<small>ms</small></div>
           </div>
         </div>
       </div>

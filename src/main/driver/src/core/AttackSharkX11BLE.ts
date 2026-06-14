@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import dbus from 'dbus-next'
 import { DpiBuilder, type DpiBuilderOptions } from '../protocols/DpiBuilder.js'
 import { UserPreferencesBuilder, type UserPreferencesBuilderOptions } from '../protocols/UserPreferencesBuilder.js'
+import { MacrosBuilder, type MacroBuilderOptions } from '../protocols/MacrosBuilder.js'
 import { ConnectionMode } from '../types.js'
 import { delay } from '../utils/delay.js'
 
@@ -225,8 +226,16 @@ export class AttackSharkX11BLE extends EventEmitter<AttackSharkX11BLEEvents> {
   // Polling rate is a USB-only feature — silently ignored on BLE
   async setPollingRate(_rate: unknown): Promise<void> { /* no-op on BLE */ }
 
-  // Macros untested via BLE — silently ignored
-  async setMacro(_config: unknown): Promise<void> { /* no-op on BLE */ }
+  async setMacro(config: MacroBuilderOptions | MacrosBuilder): Promise<void> {
+    if (!this.isOpen) throw new Error('BLE driver not open')
+    const builder = config instanceof MacrosBuilder ? config : new MacrosBuilder(config)
+    const payload = builder.build(ConnectionMode.Adapter)
+    console.log(`[ble] setMacro — report 0x${payload[0]!.toString(16).padStart(2,'0')}, ${payload.length}B`)
+    await this.writeToFee3(payload)
+    await delay(150)
+  }
+
+  // CustomMacro sends 4 packets (report 0x08 multi-step) — not tested on BLE, skipped
   async setCustomMacro(_options: unknown): Promise<void> { /* no-op on BLE */ }
   async sendInternalStateResetReportBuilder(): Promise<void> { /* no-op on BLE */ }
   async reset(): Promise<void> { /* no-op on BLE */ }

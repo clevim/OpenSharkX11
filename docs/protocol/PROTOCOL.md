@@ -414,9 +414,21 @@ Escrever qualquer dado em `ffc2` com `type='request'` faz o mouse emitir
 ### Limitações confirmadas
 
 - **Polling rate**: USB-only. Sem efeito via BLE.
-- **Macros (button remapping)**: não testados via BLE; ignorados no driver BLE.
 - **HID Feature Reports via hidraw**: `HIDIOCSFEATURE` retorna `EINVAL` — o descritor BLE do mouse não declara Feature Reports.
 - **Write-without-response**: retorna `NotSupported`; apenas `request` (confirmed write) funciona.
+
+### Remap de botões via BLE — CONFIRMADO
+
+`MacrosBuilder` gera um payload de **59 bytes** com Report ID `0x08` (`wValue=0x0308`).
+Esse payload é aceito via fee3 com `type='request'` e o remap de botões é aplicado normalmente.
+
+| Payload              | Report ID | Tamanho | Funciona via BLE |
+|----------------------|-----------|---------|-----------------|
+| DpiBuilder           | `0x04`    | 56B     | ✅ confirmado    |
+| UserPreferencesBuilder | `0x05`  | 15B     | ✅ confirmado    |
+| MacrosBuilder        | `0x08`    | 59B     | ✅ confirmado    |
+| CustomMacroBuilder   | `0x08`×4  | multi   | não testado      |
+| PollingRateBuilder   | `0x06`    | 9B      | ⛔ sem efeito    |
 
 ### Limitação do modo USB-C com cabo
 
