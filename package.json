@@ -1,7 +1,7 @@
 {
-  "name": "sharkctl",
+  "name": "opensharkx11",
   "version": "1.0.0",
-  "description": "Attack Shark X11 \u2014 configurador nativo para Linux",
+  "description": "Attack Shark X11 \u2014 native Linux configurator",
   "main": "out/main/index.js",
   "author": "Clevs",
   "license": "MIT",
@@ -29,9 +29,9 @@
     "diag-report03-05": "ELECTRON_OVERRIDE_DIST_PATH=/usr/lib/electron34 node_modules/electron/dist/electron scripts/diag-report03-05.js"
   },
   "build": {
-    "appId": "dev.clevs.sharkctl",
-    "productName": "SharkCtl",
-    "artifactName": "sharkctl-${version}.${ext}",
+    "appId": "dev.clevs.opensharkx11",
+    "productName": "OpenSharkX11",
+    "artifactName": "opensharkx11-${version}.${ext}",
     "copyright": "Copyright © 2025 Clevs",
     "directories": {
       "output": "dist"
@@ -63,6 +63,7 @@
       "icon": "assets/icons"
     },
     "deb": {
+      "maintainer": "Clevs",
       "depends": ["libusb-1.0-0"],
       "afterInstall": "scripts/postinstall-deb.sh",
       "afterRemove": "scripts/postremove-deb.sh"
