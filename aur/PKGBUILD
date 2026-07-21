@@ -1,13 +1,13 @@
 # Maintainer: Clevs
 pkgname=opensharkx11
-pkgver=1.0.0
+pkgver=2.0.0
 pkgrel=1
-pkgdesc="Native Linux configurator for the Attack Shark X11 mouse (Electron)"
+pkgdesc="Native Linux configurator for the Attack Shark X11 mouse"
 arch=('x86_64')
 url="https://github.com/clevim/OpenSharkX11"
 license=('MIT')
-depends=('electron34' 'libusb')
-makedepends=('nodejs' 'npm')
+depends=('webkit2gtk-4.1' 'libusb' 'gtk3' 'libayatana-appindicator')
+makedepends=('nodejs' 'npm' 'rust' 'cargo' 'pkg-config')
 install="${pkgname}.install"
 
 # Build local: este PKGBUILD espera ser rodado de dentro da pasta aur/ do
@@ -17,49 +17,48 @@ source=()
 sha256sums=()
 
 prepare() {
-  # copia o projeto (pasta pai de aur/) para srcdir, ignorando artefatos pesados
   mkdir -p "${srcdir}/opensharkx11"
   cd "${startdir}/.."
-  for item in src assets aur package.json package-lock.json tsconfig.json \
-              electron.vite.config.ts scripts README.md; do
+  for item in src src-tauri vendor assets package.json package-lock.json \
+              vite.config.ts tsconfig.json scripts README.md; do
     if [ -e "$item" ]; then cp -r "$item" "${srcdir}/opensharkx11/"; fi
   done
+  # aur/ não entra no loop: o srcdir mora dentro dela e cp -r recursaria em si mesmo
+  install -Dm644 aur/99-attack-shark-x11.rules \
+    "${srcdir}/opensharkx11/aur/99-attack-shark-x11.rules"
 }
 
 build() {
   cd "${srcdir}/opensharkx11"
 
   npm install --no-audit --no-fund
-  npm run build
 
-  npx --yes @electron/asar pack . app.asar \
-    --unpack-dir "node_modules/usb/**" \
-    --exclude-hidden \
-    -- \
-    out package.json node_modules/usb node_modules/node-addon-api \
-    node_modules/node-gyp-build node_modules/pino node_modules/pino-* \
-    assets
+  # tauri build runs vite build then cargo build --release internally.
+  # --no-bundle: o pacote instala o binário direto, não precisa de deb/AppImage
+  npm run build -- --no-bundle
 }
 
 package() {
   cd "${srcdir}/opensharkx11"
 
-  install -Dm755 /dev/stdin "${pkgdir}/usr/bin/${pkgname}" <<LAUNCHER
-#!/bin/sh
-exec electron34 /usr/lib/${pkgname}/app.asar "\$@"
-LAUNCHER
+  # Main binary
+  install -Dm755 "src-tauri/target/release/opensharkx11" \
+    "${pkgdir}/usr/bin/opensharkx11"
 
-  install -Dm644 app.asar "${pkgdir}/usr/lib/${pkgname}/app.asar"
-  if [ -d app.asar.unpacked ]; then
-    cp -r app.asar.unpacked "${pkgdir}/usr/lib/${pkgname}/app.asar.unpacked"
-  fi
-
-  install -Dm644 assets/opensharkx11.desktop "${pkgdir}/usr/share/applications/opensharkx11.desktop"
-  install -Dm644 assets/icon.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/opensharkx11.svg"
+  # Desktop entry and icons
+  install -Dm644 "assets/opensharkx11.desktop" \
+    "${pkgdir}/usr/share/applications/opensharkx11.desktop"
+  install -Dm644 "assets/icon.svg" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/opensharkx11.svg"
   for size in 16 24 32 48 64 128 256 512; do
-    install -Dm644 "assets/icons/${size}x${size}.png" \
-      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/opensharkx11.png"
+    local icon="assets/icons/${size}x${size}.png"
+    if [ -e "$icon" ]; then
+      install -Dm644 "$icon" \
+        "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/opensharkx11.png"
+    fi
   done
 
-  install -Dm644 aur/99-attack-shark-x11.rules "${pkgdir}/usr/lib/udev/rules.d/99-attack-shark-x11.rules"
+  # udev rules for USB access without root
+  install -Dm644 "aur/99-attack-shark-x11.rules" \
+    "${pkgdir}/usr/lib/udev/rules.d/99-attack-shark-x11.rules"
 }

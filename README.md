@@ -5,7 +5,8 @@
 
   <p>
     <img src="https://img.shields.io/badge/platform-linux-informational?style=flat-square&logo=linux&logoColor=white">
-    <img src="https://img.shields.io/badge/electron-34-47848f?style=flat-square&logo=electron&logoColor=white">
+    <img src="https://img.shields.io/badge/tauri-2-ffc131?style=flat-square&logo=tauri&logoColor=black">
+    <img src="https://img.shields.io/badge/rust-backend-dea584?style=flat-square&logo=rust&logoColor=white">
     <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react&logoColor=black">
     <img src="https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square">
   </p>
@@ -13,9 +14,9 @@
 
 ---
 
-Desktop app (Electron 34 + React 19) to configure the **Attack Shark X11** on Linux — no Windows software needed. Works via **2.4 GHz dongle**, **wired USB-C**, and **Bluetooth 5.0 (BLE)**.
+Desktop app (Tauri 2 + Rust backend + React 19 UI) to configure the **Attack Shark X11** on Linux — no Windows software needed. Works via **2.4 GHz dongle**, **wired USB-C**, and **Bluetooth 5.0 (BLE)**.
 
-Cockpit-style interface: frameless window, sidebar with a clickable mouse diagram, and accent color that syncs with the configured RGB.
+Cockpit-style interface: frameless window, sidebar with a clickable mouse diagram, and accent color that syncs with the configured RGB. USB (rusb) and BLE (zbus/BlueZ) drivers run entirely in Rust — no Node.js runtime.
 
 ---
 
@@ -37,10 +38,15 @@ Cockpit-style interface: frameless window, sidebar with a clickable mouse diagra
 
 ## Requirements
 
-- **Arch / CachyOS**: `sudo pacman -S electron34 libusb bluez bluez-utils nodejs npm`
-- Any distro with **Electron 34** installed system-wide, **libusb**, and **BlueZ** (for BLE support)
-- BLE requires the mouse to be paired before launching the app (`bluetoothctl pair <MAC>`)
-- USB access requires the udev rule (see Installation)
+**Runtime:**
+- **Arch / CachyOS**: `sudo pacman -S webkit2gtk-4.1 libusb gtk3 libayatana-appindicator bluez bluez-utils`
+- Other distros: **WebKitGTK 4.1** (≥ 2.44 recommended), **libusb**, **GTK 3**, and **BlueZ** (for BLE)
+- BLE requires the mouse to be paired before launching (`bluetoothctl pair <MAC>`)
+- USB access requires the udev rule (installed automatically by the packages)
+
+**Build (from source):**
+- `rust` / `cargo`, `nodejs` / `npm`, `pkg-config`, plus the runtime deps above with `-dev`/`-devel` headers
+- Arch / CachyOS: `sudo pacman -S rust nodejs npm pkg-config webkit2gtk-4.1`
 
 ---
 
@@ -63,11 +69,6 @@ cd aur
 makepkg -si
 ```
 
-To update:
-```bash
-cd aur && makepkg -si
-```
-
 To remove:
 ```bash
 sudo pacman -R opensharkx11
@@ -78,15 +79,15 @@ sudo pacman -R opensharkx11
 ### AppImage — any Linux distro
 
 ```bash
-# 1. Download opensharkx11-1.0.0.AppImage from the releases page
-chmod +x opensharkx11-1.0.0.AppImage
+# 1. Download OpenSharkX11_2.0.0_amd64.AppImage from the releases page
+chmod +x OpenSharkX11_2.0.0_amd64.AppImage
 
 # 2. Install the udev rule (USB access without root)
 sudo cp aur/99-attack-shark-x11.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # 3. Run
-./opensharkx11-1.0.0.AppImage
+./OpenSharkX11_1.0.0_amd64.AppImage
 ```
 
 ---
@@ -94,8 +95,8 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ### .deb — Ubuntu / Debian
 
 ```bash
-# Download opensharkx11-1.0.0.deb from the releases page
-sudo dpkg -i opensharkx11-1.0.0.deb
+# Download OpenSharkX11_1.0.0_amd64.deb from the releases page
+sudo dpkg -i OpenSharkX11_1.0.0_amd64.deb
 # udev rule is installed automatically
 ```
 
@@ -104,30 +105,36 @@ sudo dpkg -i opensharkx11-1.0.0.deb
 ### Development — hot reload
 
 ```bash
-npm install      # sets up system Electron via postinstall (once)
-npm run dev
+npm install      # frontend deps + Tauri CLI (once)
+npm run dev      # tauri dev — compiles the Rust backend and starts Vite HMR
 ```
+
+The first `npm run dev` compiles the Rust backend (a few minutes); subsequent runs are incremental.
 
 ---
 
 ## Build distribution packages
 
-> **Requires Arch / CachyOS** with `electron34` installed at `/usr/lib/electron34`.
-
 ```bash
-npm run dist
-# outputs dist/opensharkx11-1.0.0.AppImage and dist/opensharkx11-1.0.0.deb
+npm run build
+# outputs, under src-tauri/target/release/bundle/:
+#   appimage/OpenSharkX11_1.0.0_amd64.AppImage
+#   deb/OpenSharkX11_1.0.0_amd64.deb
 ```
+
+> On rolling-release distros (CachyOS/Arch) the AppImage step needs these env vars so the
+> bundled `linuxdeploy` works with a modern toolchain:
+> `APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 NO_STRIP=1 npm run build`
 
 ---
 
 ## Commands
 
 ```bash
-npm run dev              # development with hot reload
-npm run build            # production build (no packaging)
-npm run dist             # build + generate AppImage and .deb in dist/
-npm run test-usb         # check if the usb module can see the mouse
+npm run dev              # tauri dev (Rust backend + Vite HMR)
+npm run build            # tauri build → AppImage + .deb
+npm run dev:renderer     # Vite only (frontend, no Rust — fast UI iteration)
+npm run build:renderer   # Vite production build only
 ```
 
 ---
@@ -135,22 +142,28 @@ npm run test-usb         # check if the usb module can see the mouse
 ## Project structure
 
 ```
-src/
-├── main/                  — main process (IPC, USB queue, JSON persistence)
-│   └── driver/            — USB driver (fork of HarukaYamamoto0)
-│       └── protocols/     — payload builders (DPI, Macro, Polling, Lighting)
-├── preload/               — contextBridge → window.api
-└── renderer/              — React 19 UI
-    ├── app.jsx            — root component and global state
-    ├── sections.jsx       — tab sections
-    ├── data.jsx           — constants, SVG icons, mouse data
-    ├── i18n.jsx           — translations and accent color themes
-    └── style.css          — cockpit design system
+src/                    — React 19 frontend (Vite)
+├── app.jsx             — root component and global state
+├── api.ts              — Tauri IPC wrapper (invoke / listen)
+├── sections.jsx        — tab sections
+├── data.jsx            — constants, SVG icons, mouse data
+├── i18n.jsx            — translations and accent color themes
+└── style.css           — cockpit design system
 
-assets/                    — icons (SVG + PNG) and opensharkx11.desktop
-aur/                       — PKGBUILD for Arch / CachyOS
-docs/protocol/             — USB HID reverse engineering
-scripts/                   — lighting diagnostics and Electron setup
+src-tauri/              — Rust backend (Tauri 2)
+├── src/
+│   ├── commands.rs     — #[tauri::command] IPC handlers
+│   ├── driver/         — USB (rusb) + BLE (zbus/BlueZ) drivers
+│   ├── protocols/      — payload builders (DPI, Macro, Polling, Lighting)
+│   ├── state.rs        — config persistence (~/.config/opensharkx11)
+│   └── tray.rs         — system tray (battery + connection mode)
+└── tauri.conf.json
+
+reference/              — original TypeScript driver (source of the Rust port)
+assets/                 — icons + opensharkx11.desktop
+aur/                    — PKGBUILD for Arch / CachyOS
+docs/protocol/          — USB HID reverse engineering
+scripts/                — .deb udev install/remove hooks
 ```
 
 ---

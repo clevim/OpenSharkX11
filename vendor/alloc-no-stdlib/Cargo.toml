@@ -1,0 +1,11 @@
+[package]
+name = "alloc-no-stdlib"
+version = "2.0.5"
+authors = ["Daniel Reiter Horn <danielrh@dropbox.com>"]
+edition = "2021"
+description = "Local patch: alloc-no-stdlib 3.0.0 source shipped as 2.0.5 to unify Allocator<T> trait across brotli + brotli-decompressor"
+license = "BSD-3-Clause"
+autobins = false
+
+[features]
+unsafe = []

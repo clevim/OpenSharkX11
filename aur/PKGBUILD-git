@@ -3,12 +3,12 @@
 pkgname=opensharkx11-git
 pkgver=r1.g0000000
 pkgrel=1
-pkgdesc="Native Linux configurator for the Attack Shark X11 mouse (Electron)"
+pkgdesc="Native Linux configurator for the Attack Shark X11 mouse"
 arch=('x86_64')
 url="https://github.com/clevim/OpenSharkX11"
 license=('MIT')
-depends=('electron34' 'libusb')
-makedepends=('nodejs' 'npm' 'git')
+depends=('webkit2gtk-4.1' 'libusb' 'gtk3' 'libayatana-appindicator')
+makedepends=('nodejs' 'npm' 'rust' 'cargo' 'git' 'pkg-config')
 provides=('opensharkx11')
 conflicts=('opensharkx11')
 install="opensharkx11.install"
@@ -22,40 +22,25 @@ pkgver() {
 
 prepare() {
   cd "$pkgname"
-  # --ignore-scripts evita setup-electron.mjs (configura só o devenv local)
-  npm install --ignore-scripts --no-audit --no-fund
+  npm install --no-audit --no-fund
 }
 
 build() {
   cd "$pkgname"
-  npm run build
-
-  npx --yes @electron/asar pack . app.asar \
-    --unpack-dir "node_modules/usb/**" \
-    --exclude-hidden \
-    -- \
-    out package.json \
-    node_modules/usb \
-    node_modules/node-gyp-build \
-    node_modules/@electron-toolkit \
-    assets
+  # --no-bundle: o pacote instala o binário direto, não precisa de deb/AppImage
+  npm run build -- --no-bundle
 }
 
 package() {
   cd "$pkgname"
 
-  install -Dm755 /dev/stdin "${pkgdir}/usr/bin/opensharkx11" <<'LAUNCHER'
-#!/bin/sh
-exec electron34 /usr/lib/opensharkx11/app.asar "$@"
-LAUNCHER
+  install -Dm755 "src-tauri/target/release/opensharkx11" \
+    "${pkgdir}/usr/bin/opensharkx11"
 
-  install -Dm644 app.asar "${pkgdir}/usr/lib/opensharkx11/app.asar"
-  if [ -d app.asar.unpacked ]; then
-    cp -r app.asar.unpacked "${pkgdir}/usr/lib/opensharkx11/app.asar.unpacked"
-  fi
-
-  install -Dm644 assets/opensharkx11.desktop "${pkgdir}/usr/share/applications/opensharkx11.desktop"
-  install -Dm644 assets/icon.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/opensharkx11.svg"
+  install -Dm644 "assets/opensharkx11.desktop" \
+    "${pkgdir}/usr/share/applications/opensharkx11.desktop"
+  install -Dm644 "assets/icon.svg" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/opensharkx11.svg"
   for size in 16 24 32 48 64 128 256 512; do
     if [ -f "assets/icons/${size}x${size}.png" ]; then
       install -Dm644 "assets/icons/${size}x${size}.png" \
@@ -63,6 +48,7 @@ LAUNCHER
     fi
   done
 
-  install -Dm644 aur/99-attack-shark-x11.rules \
+  # udev rules for USB access without root
+  install -Dm644 "aur/99-attack-shark-x11.rules" \
     "${pkgdir}/usr/lib/udev/rules.d/99-attack-shark-x11.rules"
 }

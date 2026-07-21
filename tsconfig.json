@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
-    "strict": true, "skipLibCheck": true, "types": ["node"]
+    "strict": true, "skipLibCheck": true, "types": ["node"],
+    "jsx": "react-jsx", "allowJs": true, "noEmit": true
   },
-  "include": ["src/main/**/*.ts", "src/preload/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.jsx"]
 }

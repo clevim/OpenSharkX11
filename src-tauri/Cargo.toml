@@ -1,0 +1,41 @@
+[package]
+name = "opensharkx11"
+version = "2.0.0"
+edition = "2021"
+
+[lib]
+name = "opensharkx11_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+# Sem isso o crate `tauri` liga cfg(dev) e o webview carrega o devUrl mesmo em
+# release. `tauri build` passa --features custom-protocol automaticamente.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri        = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+rusb         = "0.9"
+zbus         = { version = "4", default-features = false, features = ["tokio"] }
+tokio        = { version = "1", features = ["full"] }
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+image        = { version = "0.25", default-features = false, features = ["png"] }
+tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = "0.3"
+dirs         = "5"
+
+[patch.crates-io]
+# brotli 8.0.3 pins alloc-no-stdlib = "2.0" while brotli-decompressor uses 3.0.0,
+# causing two copies of the Allocator<T> trait that are incompatible. This local
+# shim ships the 3.0.0 source declared as 2.0.5 so all crates share one trait.
+alloc-no-stdlib = { path = "../vendor/alloc-no-stdlib" }
+
+[profile.release]
+opt-level  = 3
+lto        = true
+codegen-units = 1
+strip      = true
