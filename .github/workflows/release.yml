@@ -21,16 +21,33 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libusb-1.0-0-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            file
 
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
-      - name: Build and package
-        run: npm run dist
+      - name: Build Tauri app
+        run: npm run build
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AppImage bundling (linuxdeploy): run tools without FUSE, force arch,
+          # and skip strip (bundled strip chokes on modern .relr.dyn sections).
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          ARCH: x86_64
+          NO_STRIP: 1
 
       - name: Upload artifacts (branch builds)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -38,8 +55,8 @@ jobs:
         with:
           name: sharkctl-dist
           path: |
-            dist/*.AppImage
-            dist/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
           retention-days: 7
 
       - name: Create GitHub Release
@@ -47,6 +64,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.AppImage
-            dist/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
           generate_release_notes: true
