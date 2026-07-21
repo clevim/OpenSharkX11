@@ -1,6 +1,9 @@
 node_modules/
 dist/
+# saída do makepkg (o PKGBUILD local roda de dentro de aur/)
 *.pkg.tar.zst
+aur/src/
+aur/pkg/
 .DS_Store
 
 # scratch pessoal (releases/, retag.sh)
