@@ -1,9 +1,11 @@
 node_modules/
-out/
 dist/
-app.asar
-app.asar.unpacked/
 *.pkg.tar.zst
-src/main/driver/node_modules/
 .DS_Store
+
+# scratch pessoal (releases/, retag.sh)
 local/
+# cópia de trabalho do driver TS antigo — o histórico do git já tem em src/main/driver/
+reference/
+# plano da conversão Electron→Tauri, documento de trabalho
+MIGRATION_PLAN.md
