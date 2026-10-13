@@ -25,9 +25,10 @@ if [[ ! -f "$appdir/AppRun" ]]; then
   exit 1
 fi
 
-chmod +x "$appdir/AppRun"
-if [[ -f "$appdir/usr/bin/opensharkx11" ]]; then
-  chmod +x "$appdir/usr/bin/opensharkx11"
+chmod -R a+rX "$appdir"
+chmod a+x "$appdir/AppRun"
+if [[ -f "$appdir/AppRun.wrapped" ]]; then
+  chmod a+x "$appdir/AppRun.wrapped"
 fi
 
 install -m 0644 src-tauri/icons/256x256.png "$appdir/.DirIcon"
@@ -39,17 +40,25 @@ mkdir "$work_dir/verify"
   cd "$work_dir/verify"
   "$work_dir/rebuilt.AppImage" --appimage-extract >/dev/null
 )
+require_public_rx() {
+  local path=$1 mode
+  mode=$(stat -c '%a' "$path")
+  if (( (8#$mode & 5) != 5 )); then
+    printf 'Rebuilt AppImage file is not readable/executable by all users: %s (mode %s)\n' "$path" "$mode" >&2
+    exit 1
+  fi
+}
+
 if [[ ! -s "$work_dir/verify/squashfs-root/.DirIcon" ]]; then
   printf 'Rebuilt AppImage is missing .DirIcon\n' >&2
   exit 1
 fi
-if [[ ! -x "$work_dir/verify/squashfs-root/AppRun" ]]; then
-  printf 'Rebuilt AppImage AppRun is not executable\n' >&2
-  exit 1
+require_public_rx "$work_dir/verify/squashfs-root/AppRun"
+if [[ -f "$work_dir/verify/squashfs-root/AppRun.wrapped" ]]; then
+  require_public_rx "$work_dir/verify/squashfs-root/AppRun.wrapped"
 fi
-if [[ -f "$work_dir/verify/squashfs-root/usr/bin/opensharkx11" && ! -x "$work_dir/verify/squashfs-root/usr/bin/opensharkx11" ]]; then
-  printf 'Rebuilt AppImage application binary is not executable\n' >&2
-  exit 1
+if [[ -f "$work_dir/verify/squashfs-root/usr/bin/opensharkx11" ]]; then
+  require_public_rx "$work_dir/verify/squashfs-root/usr/bin/opensharkx11"
 fi
 
 mv "$work_dir/rebuilt.AppImage" "$image"
