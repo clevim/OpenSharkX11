@@ -25,8 +25,14 @@ if [[ ! -f "$appdir/AppRun" ]]; then
   exit 1
 fi
 
+chmod +x "$appdir/AppRun"
+if [[ -f "$appdir/usr/bin/opensharkx11" ]]; then
+  chmod +x "$appdir/usr/bin/opensharkx11"
+fi
+
 install -m 0644 src-tauri/icons/256x256.png "$appdir/.DirIcon"
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool" "$appdir" "$work_dir/rebuilt.AppImage"
+chmod +x "$work_dir/rebuilt.AppImage"
 
 mkdir "$work_dir/verify"
 (
@@ -37,7 +43,14 @@ if [[ ! -s "$work_dir/verify/squashfs-root/.DirIcon" ]]; then
   printf 'Rebuilt AppImage is missing .DirIcon\n' >&2
   exit 1
 fi
+if [[ ! -x "$work_dir/verify/squashfs-root/AppRun" ]]; then
+  printf 'Rebuilt AppImage AppRun is not executable\n' >&2
+  exit 1
+fi
+if [[ -f "$work_dir/verify/squashfs-root/usr/bin/opensharkx11" && ! -x "$work_dir/verify/squashfs-root/usr/bin/opensharkx11" ]]; then
+  printf 'Rebuilt AppImage application binary is not executable\n' >&2
+  exit 1
+fi
 
-chmod +x "$work_dir/rebuilt.AppImage"
 mv "$work_dir/rebuilt.AppImage" "$image"
 printf 'Added and verified .DirIcon in %s\n' "$image"
