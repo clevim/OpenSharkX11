@@ -49,6 +49,14 @@ jobs:
           ARCH: x86_64
           NO_STRIP: 1
 
+      - name: Ensure AppImage .DirIcon
+        run: |
+          curl --fail --location \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            --output "$RUNNER_TEMP/appimagetool"
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          bash scripts/fix-appimage-diricon.sh "$RUNNER_TEMP/appimagetool"
+
       - name: Upload artifacts (branch builds)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
