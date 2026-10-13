@@ -1,6 +1,6 @@
 # Maintainer: Clevs
 pkgname=opensharkx11
-pkgver=2.0.0
+pkgver=2.0.1
 pkgrel=1
 pkgdesc="Native Linux configurator for the Attack Shark X11 mouse"
 arch=('x86_64')

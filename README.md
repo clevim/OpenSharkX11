@@ -79,15 +79,15 @@ sudo pacman -R opensharkx11
 ### AppImage — any Linux distro
 
 ```bash
-# 1. Download OpenSharkX11_2.0.0_amd64.AppImage from the releases page
-chmod +x OpenSharkX11_2.0.0_amd64.AppImage
+# 1. Download OpenSharkX11_2.0.1_amd64.AppImage from the releases page
+chmod +x OpenSharkX11_2.0.1_amd64.AppImage
 
 # 2. Install the udev rule (USB access without root)
 sudo cp aur/99-attack-shark-x11.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # 3. Run
-./OpenSharkX11_1.0.0_amd64.AppImage
+./OpenSharkX11_2.0.1_amd64.AppImage
 ```
 
 ---
@@ -95,8 +95,8 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ### .deb — Ubuntu / Debian
 
 ```bash
-# Download OpenSharkX11_1.0.0_amd64.deb from the releases page
-sudo dpkg -i OpenSharkX11_1.0.0_amd64.deb
+# Download OpenSharkX11_2.0.1_amd64.deb from the releases page
+sudo dpkg -i OpenSharkX11_2.0.1_amd64.deb
 # udev rule is installed automatically
 ```
 
@@ -118,8 +118,8 @@ The first `npm run dev` compiles the Rust backend (a few minutes); subsequent ru
 ```bash
 npm run build
 # outputs, under src-tauri/target/release/bundle/:
-#   appimage/OpenSharkX11_1.0.0_amd64.AppImage
-#   deb/OpenSharkX11_1.0.0_amd64.deb
+#   appimage/OpenSharkX11_2.0.1_amd64.AppImage
+#   deb/OpenSharkX11_2.0.1_amd64.deb
 ```
 
 > On rolling-release distros (CachyOS/Arch) the AppImage step needs these env vars so the

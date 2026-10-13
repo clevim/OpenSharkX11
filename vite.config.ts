@@ -25,6 +25,6 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
   define: {
-    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '1.0.0'),
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '2.0.1'),
   },
 })
