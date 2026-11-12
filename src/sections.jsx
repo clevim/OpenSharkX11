@@ -64,7 +64,7 @@ export function ConsoleSection({ctx}){
           )}
           <div className="divider"></div>
           <div style={{display:'flex',gap:'8px',marginBottom:'10px'}}>
-            <button className="btn" style={{flex:1}} onClick={reconnect} disabled={connecting}>
+            <button className="btn" style={{flex:1}} onClick={() => reconnect()} disabled={connecting}>
               {connecting ? t('con.searching') : connected ? t('con.reconnect') : t('con.findmouse')}
             </button>
             {!connected && (
